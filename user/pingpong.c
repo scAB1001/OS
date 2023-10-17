@@ -1,54 +1,68 @@
 #include "kernel/types.h"
-#include "kernel/stat.h"
 #include "user/user.h"
 
 int main()
 {
-        int parentToChild[2], childToParent[2];
-        char buf;
-
-        if (pipe(parentToChild) < 0 || pipe(childToParent) < 0)
-        {  // Usage check
-                fprintf(2, "Pipe creation failed\n");
-                exit(1);
+        /* Usageint argc, char *argv[]
+        if (argc < 2)
+        {
+                fprintf(2, "Usage: pingpong <byteToPing>\n");
+                exit(0);
         }
 
-        int pid = fork();
+        // 0. Temp byte to ping
+        unsigned char *buf = (unsigned char *)argv[1];*/
 
+        // 1. Create int array to pipe [2], pipe(arr_name); puts fd into arr
+        char inputB = 'X';
+        int p[2];
+
+        // Check pipe() didn't fail
+        if (pipe(p) < 0)
+        {
+                fprintf(2, "Pipe creation failed\n");
+                close(p[0]);
+                close(p[1]);
+                exit(1);
+        }
+        
+        // 2. Generate new process, giving child and parent processes
+        int pid = fork();
         if (pid < 0)
         {
                 fprintf(2, "Fork failed\n");
+                close(p[0]);
+                close(p[1]);
                 exit(1);
         }
 
+        // Check for the child process
         if (pid == 0)
-        {  // Child process
-                close(parentToChild[1]);                                // Close write end of parentToChild pipe
-                close(childToParent[0]);                                // Close read end of childToParent pipe
+        {
+                // 2.
+                char pingedB;
+                read(p[0], &pingedB, 1);                            
+                fprintf(1, "%d: received ping <%c>\n", getpid(), pingedB);
 
-                read(parentToChild[0], &buf, sizeof(buf));              // Read a byte from parent
-                fprintf(1, "%d: received ping\n", getpid());
-
-                write(childToParent[1], &buf, sizeof(buf));             // Write the byte to parent
-
-                close(parentToChild[0]);                                // Close read end of parentToChild pipe
-                close(childToParent[1]);                                // Close write end of childToParent pipe
+                if (pingedB == 'X')
+                        pingedB = 'Q';
+                
+                write(p[1], &pingedB, 1);                                                  
                 exit(0);
         }
+        // Check for the parent process
         else
-        {  // Parent process
-                close(parentToChild[0]);                                // Close read end of parentToChild pipe
-                close(childToParent[1]);                                // Close write end of childToParent pipe
+        {       // 1.
+                write(p[1], &inputB, 1);
+                pid = wait((int *)0);
+                int my_pid = getpid();
 
-                char message[] = "X";
-                write(parentToChild[1], message, sizeof(message));      // Send a byte to child
+                // --------------------------JUMP 2 CHILD PROCESS----------------------------- //
 
-                read(childToParent[0], &buf, sizeof(buf));              // Read a byte from child
-                fprintf(1, "%d: received pong\n", getpid());
-
-                close(parentToChild[1]);                                // Close write end of parentToChild pipe
-                close(childToParent[0]);                                // Close read end of childToParent pipe
-                exit(0);
+                // 3.
+                char pongedB;
+                read(p[0], &pongedB, 1);
+                fprintf(1, "%d: received pong <%c>\n", my_pid, pongedB);
         }
 
         exit(0);
