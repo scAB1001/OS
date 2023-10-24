@@ -2,7 +2,7 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
-void runCmd(char *cmd)
+void run_cmd(char **cmd)
 {
 	int pid;
 
@@ -16,15 +16,23 @@ void runCmd(char *cmd)
 	if (pid == 0)
 	{
 		// Child process
-		exec(cmd, 0);
+		exec(*cmd, cmd);
 		printf("my_shell: %s not found\n", cmd);
 		exit(0);
 	}
 	else
-	{
+	{ 
 		// Parent process
 		wait(0); // Wait for the child process to finish
 	}
+}
+
+void remove_spaces() {
+
+}
+
+void split_string() {
+	// Returns an arr of valid 
 }
 
 int main(int argc, char *argv[]) {
@@ -37,9 +45,8 @@ int main(int argc, char *argv[]) {
 		// Using read system call to get input
 		int bytesRead = read(0, input, sizeof(input));
 		if (bytesRead <= 0)
-		{
 			break;
-		}
+		
 		// Replace '\n' with '\0' to remove trailing newline
 		input[bytesRead - 1] = '\0';
 
@@ -51,7 +58,7 @@ int main(int argc, char *argv[]) {
 		else if (strcmp(input, "ls") == 0)
 		{
 			// Handle "ls" command
-			runCmd("ls");
+			run_cmd("ls");
 		}
 		// The space is to allow for a destination
 		else if (input[0] == 'c' && input[1] == 'd' && input[2] == ' ')
@@ -61,9 +68,7 @@ int main(int argc, char *argv[]) {
 			{
 				fprintf(1, "cd: %s failed\n", directory);
 			} 	
-		}
-		else
-		{
+		} else {
 			exit(5);
 			/*// Execute the command using exec
 			int pid = fork();
