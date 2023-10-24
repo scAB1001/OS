@@ -125,6 +125,7 @@ UPROGS=\
 	$U/_ln\
 	$U/_ls\
 	$U/_mkdir\
+	$U/_my_shell\
 	$U/_rm\
 	$U/_sh\
 	$U/_stressfs\
@@ -133,9 +134,8 @@ UPROGS=\
 	$U/_wc\
 	$U/_zombie\
 	$U/_hw\
-	$U/_sleep\
 	$U/_pingpong\
-	$U/_find
+	$U/_sleep
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
