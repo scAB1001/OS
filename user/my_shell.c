@@ -1,7 +1,9 @@
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
+#include <stddef.h>
 
+//_V2
 void run_cmd(char **cmd)
 {
 	int pid;
@@ -16,8 +18,15 @@ void run_cmd(char **cmd)
 	if (pid == 0)
 	{
 		// Child process
-		exec(*cmd, cmd);
-		printf("my_shell: %s not found\n", cmd);
+		if (exec(*cmd, cmd) == -1)
+		{
+			printf("exec %s failed\n", *cmd);
+		}
+		else
+		{
+			printf("exec %s\n", *cmd);
+		}
+
 		exit(0);
 	}
 	else
@@ -27,17 +36,145 @@ void run_cmd(char **cmd)
 	}
 }
 
-void remove_spaces() {
+void run_cmd2(char *cmd)
+{
+	int pid;
 
+	// Fork a child process
+	if ((pid = fork()) < 0)
+	{
+		fprintf(1, "Fork failed\n");
+		return;
+	}
+
+	if (pid == 0)
+	{
+		// Child process
+		exec(cmd, 0);
+		printf("my_shell: %s not found\n", cmd);
+		exit(0);
+	}
+	else
+	{
+		// Parent process
+		wait(0); // Wait for the child process to finish
+	}
 }
 
-void split_string() {
-	// Returns an arr of valid 
+// Get the length of a string
+int count_chars(char *str)
+{
+	int length = 0;
+	while (*str != '\0')
+	{
+		length++;
+		str++;
+	}
+	return length;
 }
+
+// Get the length of the array of strings
+int count_strings(char **str)
+{
+	int count = 0;
+	while (*str != NULL)
+	{
+		count++;
+		str++;
+	}
+	return count;
+}
+
+// Remove a final spaces from a string
+void rm_trailing_space(char *str)
+{
+	// - 1 as the actual last is '\0'
+	int strLen = count_chars(str) - 1;
+	char lastChar = str[strLen];
+
+	if (lastChar == ' ')
+		str[strLen] = '\0';
+}
+
+// Remove consecutive spaces from a string
+void rm_consecutive_whitespace(char *input)
+{
+	// Store output
+	char output[512];
+	// Track consecutive spaces (single spaces eg "cd .." are allowed)
+	int numSpaces = 0, i;
+
+	// Iterate until a null terminator is reached
+	for (i = 0; input[i]; i++)
+	{
+		// Copy cur char or prev non-space chars (not the first)
+		if (input[i] != ' ' || (i > 0 && input[i - 1] != ' '))
+			output[i - numSpaces] = input[i];
+		else
+			numSpaces++;
+	}
+
+	output[i - numSpaces] = '\0';
+
+	// Copy the modified string back to input
+	for (i = 0; output[i]; i++)
+		input[i] = output[i];
+
+	// Remove trailing (consecutive) whitespace
+	input[i] = '\0';
+
+	rm_trailing_space(input);
+}
+
+// Tokenize a cleaned string input
+void tokenize_string(char *str, char **tokens)
+{
+	int i = 0;
+	while (*str != '\0')
+	{
+		// Store the start of the token
+		tokens[i] = str;
+
+		// Find the end of the token
+		while (*str != ' ' && *str != '\0')
+			str++;
+
+		// End the token when a space is found
+		if (*str == ' ')
+		{
+			*str = '\0';
+			str++;
+		}
+
+		// Proceed to the next token
+		i++;
+	}
+
+	// Ensure the last element is NULL to mark the end of tokens
+	tokens[i] = NULL;
+}
+
+void display_tokens(char **tokens)
+{
+	printf("Tokens:\t\t");
+	for (int i = 0; i < count_strings(tokens); i++)
+		printf("'%s'\t", tokens[i]);
+
+	/*
+	int i = 0;
+	while (tokens[i] != NULL)
+	{
+		printf("'%s'\t", tokens[i]);
+		i++;
+	}
+	*/
+}
+
 
 int main(int argc, char *argv[]) {
-	fprintf(1, "1");
-	char input[128];
+	printf("--------------------\n");
+	char input[512];
+	char *tokens[64];
 
 	while (1) {
 		fprintf(0, ">>> ");
@@ -45,12 +182,21 @@ int main(int argc, char *argv[]) {
 		// Using read system call to get input
 		int bytesRead = read(0, input, sizeof(input));
 		if (bytesRead <= 0)
+		{
 			break;
+		}
+		printf("\ninputV0:\t'%s'\n", input);
 		
-		// Replace '\n' with '\0' to remove trailing newline
+		// Replace '\n' with '\0'
 		input[bytesRead - 1] = '\0';
+		printf("inputV1:\t'%s'\n", input);
 
-		//gets(input, sizeof(input));
+		rm_consecutive_whitespace(input);
+		printf("inputV2:\t'%s'\n", input);
+
+		tokenize_string(input, tokens);
+		display_tokens(tokens);
+		printf("\n--------------------\n\n");
 
 		if (strcmp(input, "exit") == 0) {
 			break; // Exit the shell
@@ -58,39 +204,14 @@ int main(int argc, char *argv[]) {
 		else if (strcmp(input, "ls") == 0)
 		{
 			// Handle "ls" command
-			run_cmd("ls");
+			run_cmd(tokens);
 		}
 		// The space is to allow for a destination
-		else if (input[0] == 'c' && input[1] == 'd' && input[2] == ' ')
+		else 
 		{
-			char *directory = input + 3; // Extract the directory from the input
-			if (chdir(directory) < 0)
-			{
-				fprintf(1, "cd: %s failed\n", directory);
-			} 	
-		} else {
-			exit(5);
-			/*// Execute the command using exec
-			int pid = fork();
-			if (pid == 0)
-			{
-				exec(input, 0);
-				fprintf(1, "my_shell: %s not found\n", input);
-				exit(1);
-			}
-			else
-			{
-				// Remove trailing newline character
-				int len = strlen(input);
-				if (input[len - 1] == '\n')
-				{
-					input[len - 1] = '\0';
-				}
-			}*/
+			run_cmd(tokens);
 		}
-		}
+	}
 
 	exit(0);
 }
-
-
