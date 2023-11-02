@@ -3,7 +3,7 @@
 #include "user/user.h"
 #include <stddef.h>
 
-//_V2
+// Execute a command
 void run_cmd(char **cmd)
 {
 	int pid;
@@ -30,34 +30,9 @@ void run_cmd(char **cmd)
 		exit(0);
 	}
 	else
-	{ 
-		// Parent process
-		wait(0); // Wait for the child process to finish
-	}
-}
-
-void run_cmd2(char *cmd)
-{
-	int pid;
-
-	// Fork a child process
-	if ((pid = fork()) < 0)
-	{
-		fprintf(1, "Fork failed\n");
-		return;
-	}
-
-	if (pid == 0)
-	{
-		// Child process
-		exec(cmd, 0);
-		printf("my_shell: %s not found\n", cmd);
-		exit(0);
-	}
-	else
 	{
 		// Parent process
-		wait(0); // Wait for the child process to finish
+		wait(0); // Wait for child process to finish
 	}
 }
 
@@ -86,44 +61,58 @@ int count_strings(char **str)
 }
 
 // Remove a final spaces from a string
-void rm_trailing_space(char *str)
+
+void rm_trailing_whitespace(char *str)
 {
 	// - 1 as the actual last is '\0'
 	int strLen = count_chars(str) - 1;
 	char lastChar = str[strLen];
 
 	if (lastChar == ' ')
+	{
 		str[strLen] = '\0';
+	}
 }
 
 // Remove consecutive spaces from a string
-void rm_consecutive_whitespace(char *input)
+void rm_consecutive_whitespace(char *str)
 {
-	// Store output
 	char output[512];
+
 	// Track consecutive spaces (single spaces eg "cd .." are allowed)
-	int numSpaces = 0, i;
+	int i, numSpaces = 0;
 
 	// Iterate until a null terminator is reached
-	for (i = 0; input[i]; i++)
+	for (i = 0; str[i]; i++)
 	{
 		// Copy cur char or prev non-space chars (not the first)
-		if (input[i] != ' ' || (i > 0 && input[i - 1] != ' '))
-			output[i - numSpaces] = input[i];
+		if (str[i] != ' ' || (i > 0 && str[i - 1] != ' '))
+		{
+			output[i - numSpaces] = str[i];
+		}
 		else
+		{	
 			numSpaces++;
+		}
 	}
 
 	output[i - numSpaces] = '\0';
 
-	// Copy the modified string back to input
+	// Copy the modified string back to str
 	for (i = 0; output[i]; i++)
-		input[i] = output[i];
+	{	
+		str[i] = output[i];
+	}
 
 	// Remove trailing (consecutive) whitespace
-	input[i] = '\0';
+	str[i] = '\0';
+}
 
-	rm_trailing_space(input);
+// Group function to remove all possible excess whitespace
+void rm_whitespace(char *str)
+{
+	rm_consecutive_whitespace(str);
+	rm_trailing_whitespace(str);
 }
 
 // Tokenize a cleaned string input
@@ -170,13 +159,14 @@ void display_tokens(char **tokens)
 	*/
 }
 
-
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
 	printf("--------------------\n");
 	char input[512];
 	char *tokens[64];
 
-	while (1) {
+	while (1)
+	{
 		fprintf(0, ">>> ");
 
 		// Using read system call to get input
@@ -186,19 +176,20 @@ int main(int argc, char *argv[]) {
 			break;
 		}
 		printf("\ninputV0:\t'%s'\n", input);
-		
+
 		// Replace '\n' with '\0'
 		input[bytesRead - 1] = '\0';
 		printf("inputV1:\t'%s'\n", input);
 
-		rm_consecutive_whitespace(input);
+		rm_whitespace(input);
 		printf("inputV2:\t'%s'\n", input);
 
 		tokenize_string(input, tokens);
 		display_tokens(tokens);
 		printf("\n--------------------\n\n");
 
-		if (strcmp(input, "exit") == 0) {
+		if (strcmp(input, "exit") == 0)
+		{
 			break; // Exit the shell
 		}
 		else if (strcmp(input, "ls") == 0)
@@ -207,7 +198,7 @@ int main(int argc, char *argv[]) {
 			run_cmd(tokens);
 		}
 		// The space is to allow for a destination
-		else 
+		else
 		{
 			run_cmd(tokens);
 		}
