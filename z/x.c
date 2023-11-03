@@ -3,8 +3,13 @@
 #include <string.h>
 
 #include <unistd.h>
-#include <fcntl.h>
+#include <fcntl.h> // Includes 0_
 
+#define O_RDONLY 0x000
+#define O_WRONLY 0x001
+#define O_RDWR 0x002
+#define O_CREATE 0x200
+#define O_TRUNC 0x400
 
 // Execute a command
 void run_cmd(char **cmd)
@@ -156,14 +161,6 @@ void display_tokens(char **tokens)
         printf("'%s'\t", tokens[i]);
     }
 
-    /*
-    int i = 0;
-    while (tokens[i] != NULL)
-    {
-        printf("'%s'\t", tokens[i]);
-        i++;
-    }
-    */
     printf("\n");
 }
 
@@ -228,49 +225,7 @@ void cd(char **tokens)
  * 
 */
 
-
-
 // Finds the first occurrence of that character 
-int contains_char_xtra(char **strings, char target, int *strPos, int *charPos)
-{
-    // Start value for indices (non-existent to start)
-    *strPos = -1;
-    *charPos = -1;
-
-    // str and char counters, flag to indicate if inside quotes
-    int i = 0, j, inQuotes;
-
-    // Loop through each string in arr of strings
-    while (strings[i] != NULL)
-    {
-        char *curStr = strings[i];
-        j = 0;
-        inQuotes = 0;
-
-        // Loop through chars in current string
-        while (curStr[j] != '\0')
-        {
-            // Check for a valid, non-quote match (for '<' or '>')
-            if (j == 0 && curStr[j] == target && !inQuotes)
-            {
-                *strPos = i;
-                *charPos = j;
-                return 1;
-            }
-            if (is_quote(curStr[j]))
-            {
-                // Toggle flag
-                inQuotes = !inQuotes;
-            }
-            j++;
-        }
-        i++;
-    }
-
-    return 0;
-}
-
-// Simpler
 int contains_char(char **strings, char target, int *strPos)
 {
     /* Need to find a '<' or '>' alone, as the first index of 
@@ -306,21 +261,18 @@ int contains_char(char **strings, char target, int *strPos)
 // Group method for finding a target character in an arr of strings
 int search_for(char target, char** str)
 {
-    int strPos, charPos;
-    // print first string
-    //printf("\n> ' %s '\n", *str);
-    //if (contains_char_xtra(str, target, &strPos, &charPos))
+    int strPos;
     if (contains_char(str, target, &strPos))
     {
-        //printf("Found '%c' at string[i]: %d, character[i]: %d.\n", target, strPos, charPos);
         printf("\nFound '%c' at string[i]: %d.\n", target, strPos);
     }
     else
     {
         printf("\nDid not find '%c' character in the array of strings.\n", target);
+        printf("strPos: %d.\n", strPos);
     }
 
-    return 0;
+    return strPos;
 }
 
 void check_direction(char **tokens)
@@ -328,83 +280,118 @@ void check_direction(char **tokens)
     
 }
 
-int brev()
+int elem_redirection(char *str, char **tokens)
 {
-    // open() returns a file descriptor file_desc to a the file "dup.txt" here"
+    char buf[512];
+    int fd;
 
-    int file_desc = open("dup.txt", O_WRONLY | O_APPEND);
-
-    if (file_desc < 0)
+    if (count_strings(tokens) != 3)
     {
-        printf("Error opening the file\n");
+        printf("Usage: %s <source file> <destination file>\n", str);
+        exit(0);
     }
 
-    // dup() will create the copy of file_desc as the copy_desc
-    // then both can be used interchangeably.
+    // Open source file for reading
+    *tokens++;
+    if ((fd = open(*tokens, 0)) < 0)
+    {
+        printf("Cannot open %s\n", *tokens);
+        exit(0);
+    }
 
-    int copy_desc = dup(file_desc);
+    // Open destination file for writing
+    *tokens++;
+    if ((fd = open(*tokens, O_CREATE | O_WRONLY)) < 0)
+    {
+        printf("Cannot open %s\n", *tokens);
+        exit(0);
+    }
 
-    // write() will write the given string into the file
-    // referred by the file descriptors
+    // Read from source and write to destination
+    int bytesRead;
+    while ((bytesRead = read(fd, buf, sizeof(buf))) > 0)
+    {
+        write(1, buf, bytesRead);  // Print to console
+        write(fd, buf, bytesRead); // Write to destination file
+    }
 
-    write(copy_desc, "This will be output to the file named dup.txt\n", 46);
-    write(file_desc, "This will also be output to the file named dup.txt\n", 51);
+    // Close files
+    close(fd);
+
+    exit(0);
+}
+
+void prompt_user(char *cmd, char **tokens)
+{
+    printf("\n>>> ");
+
+    fgets(cmd, 512, stdin);
+    cmd[count_chars(cmd) - 1] = '\0';
+
+    rm_whitespace(cmd);
+    tokenize(cmd, tokens);
+}
+
+int other_programs(char **tokens)
+{
+    if (strcmp(*tokens, "exit") == 0)
+    {
+        printf("\nYou left the shell.\n");
+        printf("\n------------------------------\n\n");
+        return 1;
+    }
+    else if (strcmp(*tokens, "cd") == 0)
+    {
+        cd(tokens);
+    }
+    else if (strcmp(tokens[0], "echo") == 0)
+    {
+        echo(tokens);
+    }
 
     return 0;
 }
 
 int main(int argc, char *argv[])
 {
-    char input[512], *tokens[64];
-    //search_for();
+    char cmd[512], *tokens[64];
 
-    
     while (1)
     {
-        printf("\n------------------------------\n");
-        printf(">>> ");
+        prompt_user(cmd, tokens);
 
-        fgets(input, sizeof(input), stdin);
-        input[count_chars(input) - 1] = '\0';
+        int stringIndex = search_for('<', tokens);
 
-        rm_whitespace(input);
-        printf("input:\t'%s'\n", input);
-
-        tokenize_string(input, tokens);
-        //search_for('<', tokens);
-
-        if (strcmp(input, "exit") == 0)
+        if (other_programs(tokens))
         {
-            printf("\nYou left the shell.\n");
-            printf("\n------------------------------\n\n");
-            break; // Exit the shell
-        }
-        else if (strcmp(input, "cd") == 0)
-        {
-            cd(tokens);
-            break;
-        }
-        else if (strcmp(input, "ls") == 0)
-        {
-            // Handle "ls" command
-            // run_cmd(tokens);
-            display_tokens(tokens);
-        }
-        else if (strcmp(tokens[0], "echo") == 0)
-        {
-            // Handle "echo" command
-            echo(tokens); 
-            //brev();
+            break; // Exit
         }
         else
         {
             // Handle shell commands
-            //run_cmd(tokens);
-            display_tokens(tokens);
+            display_tokens(tokens); // run_cmd(tokens);
         }
         printf("\n------------------------------\n\n");
     }
-    /**/
 
     exit(0);
 }
+
+/* dup() explanation
+1. Duplicating a File Descriptor:
+In Unix-like systems, everything is treated as a file, including regular files, directories, devices, etc.
+When you open a file, the operating system assigns a unique identifier to it called a file descriptor.
+
+dup() is a system call that allows you to create a new file descriptor that points to the same underlying resource as an existing file descriptor.
+
+2. Creating Multiple References:
+Imagine you have opened a file and received a file descriptor, let's say fd1.
+This descriptor is like a pointer to that file.
+It allows you to read from, write to, and perform other operations on that file.
+
+Now, if you use dup(fd1), it creates a new file descriptor, let's call it fd2, that points to the same file.
+So, now you have two file descriptors (fd1 and fd2) that refer to the same file.
+
+Both fd1 and fd2 can be used to perform operations on the file.
+If you read from fd1, it's like reading from the file.
+If you write to fd2, it's like writing to the same file.*/
