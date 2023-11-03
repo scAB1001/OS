@@ -11,7 +11,7 @@ void run_cmd(char **cmd)
 	// Fork a child process
 	if ((pid = fork()) < 0)
 	{
-		fprintf(1, "Fork failed\n");
+		printf("Fork failed\n");
 		return;
 	}
 
