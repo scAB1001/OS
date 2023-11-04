@@ -4,6 +4,17 @@
 #include <stddef.h>
 //#include <fcntl.h>
 
+void free_tokens(char **tokens)
+{
+
+	for (int i = 0; tokens[i] != NULL; i++)
+	{
+		free(tokens[i]);
+	}
+	free(tokens);
+}
+
+
 // Execute a command
 void run_cmd(char **cmd)
 {
@@ -22,13 +33,14 @@ void run_cmd(char **cmd)
 		if (exec(*cmd, cmd) == -1)
 		{
 			printf("exec %s failed\n", *cmd);
+			exit(1);
 		}
 		else
 		{
 			printf("exec %s\n", *cmd);
 		}
 
-		exit(0);
+		//exit(0);
 	}
 	else
 	{
@@ -256,27 +268,33 @@ void elem_redirection(char *str, char **tokens)
 	// Open source file for reading
 }
 
-void prompt_user(char *cmd, char **tokens)
+int prompt_user(char *cmd, char **tokens)
 {
 	printf("\n>>> ");
-	// Replace '\n' with '\0'
 	int bytesRead = read(0, cmd, sizeof(cmd));
-	cmd[bytesRead - 1] = '\0';
+	if (bytesRead < 0)
+	{
+		return 1;
+	}
 
-	rm_whitespace(cmd);
-	tokenize(cmd, tokens);
+	// Replace '\n' with '\0'
+	cmd[bytesRead - 1] = '\0';
+	return 0;
 }
 
-int other_programs(char **tokens)
+int exit_shell(char **tokens)
 {
-	//int stringIndex;
-	
-	if (strcmp(*tokens, "exit") == 0)
+	if (strcmp(tokens[0], "exit") == 0)
 	{
 		printf("\nYou left the shell.\n");
 		return 1;
 	}
-	else if (strcmp(*tokens, "cd") == 0)
+	return 0;
+}
+
+void other_programs(char **tokens)
+{
+	if (strcmp(*tokens, "cd") == 0)
 	{
 		cd(tokens);
 	}
@@ -284,8 +302,6 @@ int other_programs(char **tokens)
 	{ // Run shell commands
 		run_cmd(tokens);
 	}
-
-	return 0;
 }
 
 int main(int argc, char *argv[])
@@ -294,13 +310,27 @@ int main(int argc, char *argv[])
 
 	while (1)
 	{
-		prompt_user(cmd, tokens);
-
-		if (other_programs(tokens))
+		if (prompt_user(cmd, tokens))
 		{ // Exit
+			free_tokens(tokens);
 			break;
 		}
-	}
 
-	exit(0);
+		// Handle Input	
+		rm_whitespace(cmd);
+		tokenize(cmd, tokens);
+
+		if (exit_shell(tokens))
+		{ // Exit
+			free_tokens(tokens);
+			break;
+		}
+		// Handle new commands
+		other_programs(tokens);
+
+		// End
+		free_tokens(tokens);
+	}
+	
+	return 0;
 }
