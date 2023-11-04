@@ -1,9 +1,6 @@
 #!/bin/bash
+
+gcc ./mock_shell.c -o mock_shell
 clear
-
-#gcc ./z.c -o test
-gcc ./x.c -o test
-
-./test "   echo 'Hi ho'  "
-
-rm test
+./mock_shell "   echo 'Hi ho'  "
+rm mock_shell

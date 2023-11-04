@@ -3,7 +3,11 @@
 #include <string.h>
 
 #include <unistd.h>
+<<<<<<< HEAD:z/x.c
 #include <fcntl.h> // Includes 0_
+=======
+//#include <fcntl.h> // Includes 0_
+>>>>>>> a392805 (Migrated):z/mock_shell.c
 
 #define O_RDONLY 0x000
 #define O_WRONLY 0x001
@@ -158,7 +162,7 @@ void display_tokens(char **tokens)
     printf("Tokens:\t\t");
     for (int i = 0; i < count_strings(tokens); i++)
     {
-        printf("'%s'\t", tokens[i]);
+        printf("<%s>\t", tokens[i]);
     }
 
     printf("\n");
@@ -169,7 +173,7 @@ void display_tokens(char **tokens)
  *  instead of {echo, "Hello World"}. 
  *  Use non-simple method trick for quotes.
  */
-void tokenize_string(char *str, char **tokens)
+void tokenize(char *str, char **tokens)
 {
     int i = 0;
     while (*str != '\0')
@@ -218,7 +222,6 @@ void cd(char **tokens)
 
 /* Part 3: Input/Output redirection (6 Marks)
  * Implement Input/Output redirection. 
- * Your shell should be able to handle two-element redirection.
  * For example:
  *   $ echo "Hello world" > temp    |   Open to write the left
  *   $ cat < temp                   |   Open to read the right
@@ -336,8 +339,12 @@ int other_programs(char **tokens)
 {
     if (strcmp(*tokens, "exit") == 0)
     {
+<<<<<<< HEAD:z/x.c
         printf("\nYou left the shell.\n");
         printf("\n------------------------------\n\n");
+=======
+        printf("You left the shell.\n");
+>>>>>>> a392805 (Migrated):z/mock_shell.c
         return 1;
     }
     else if (strcmp(*tokens, "cd") == 0)
@@ -352,6 +359,60 @@ int other_programs(char **tokens)
     return 0;
 }
 
+/*
+    # Read
+    cat > temp.txt
+
+    # Store 
+    cat file1.txt file2.txt > temp.txt
+
+*/
+
+void filter_dir(char* str, char** tokens)
+{
+    int numStrings = count_strings(tokens);
+    // Index of the direction character in tokens.
+    int dirIndex = search_for('>', tokens);
+    
+    if (dirIndex != -1)
+    {
+        // Create a new str arr for tokens before the '>', +1 for NULL 
+        char *newTokens[dirIndex + 1];  
+
+        // Copy tokens to newTokens
+        for (int i = 0; i < dirIndex; i++)
+        {
+            newTokens[i] = tokens[i];
+        }
+        newTokens[dirIndex] = NULL;
+
+        // Check file exists
+        if (tokens[dirIndex + 1] != NULL)
+        {
+            // Open the file for writing
+            int fd = open(tokens[dirIndex + 1], O_CREATE | O_WRONLY);
+            if (fd < 0)
+            {
+                printf("Cannot open %s\n", tokens[dirIndex + 1]);
+                exit(0);
+            }
+
+            // Write content to the file
+            int i = dirIndex + 2;
+            while (tokens[i] != NULL)
+            {
+                write(fd, tokens[i], strlen(tokens[i]));
+                write(fd, "\n", 1);
+                i++;
+            }
+
+            // Close the file descriptor
+            close(fd);
+        }
+    }
+}
+
+
 int main(int argc, char *argv[])
 {
     char cmd[512], *tokens[64];
@@ -360,7 +421,11 @@ int main(int argc, char *argv[])
     {
         prompt_user(cmd, tokens);
 
+<<<<<<< HEAD:z/x.c
         int stringIndex = search_for('<', tokens);
+=======
+        //int stringIndex = search_for('<', tokens);
+>>>>>>> a392805 (Migrated):z/mock_shell.c
 
         if (other_programs(tokens))
         {
@@ -371,7 +436,6 @@ int main(int argc, char *argv[])
             // Handle shell commands
             display_tokens(tokens); // run_cmd(tokens);
         }
-        printf("\n------------------------------\n\n");
     }
 
     exit(0);
