@@ -2,7 +2,7 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 #include <stddef.h>
-// #include <fcntl.h>
+//#include <fcntl.h>
 
 // Execute a command
 void run_cmd(char **cmd)
@@ -246,45 +246,14 @@ void check_direction(char **tokens)
 {
 }
 
-int elem_redirection(char *str, char **tokens)
+void elem_redirection(char *str, char **tokens)
 {
-	char buf[512];
-	int fd;
-
 	if (count_strings(tokens) != 3)
 	{
 		printf("Usage: %s <source file> <destination file>\n", str);
-		exit(0);
 	}
 
 	// Open source file for reading
-	//*tokens++;
-	if ((fd = open(*tokens, 0)) < 0)
-	{
-		printf("Cannot open %s\n", *tokens);
-		exit(0);
-	}
-
-	// Open destination file for writing
-	//*tokens++;
-	if ((fd = open(*tokens, O_CREATE | O_WRONLY)) < 0)
-	{
-		printf("Cannot open %s\n", *tokens);
-		exit(0);
-	}
-
-	// Read from source and write to destination
-	int bytesRead;
-	while ((bytesRead = read(fd, buf, sizeof(buf))) > 0)
-	{
-		write(1, buf, bytesRead);  // Print to console
-		write(fd, buf, bytesRead); // Write to destination file
-	}
-
-	// Close files
-	close(fd);
-
-	exit(0);
 }
 
 void prompt_user(char *cmd, char **tokens)
