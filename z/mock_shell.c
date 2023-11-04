@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include <unistd.h>
-#include <fcntl.h> // Includes 0_
+//#include <fcntl.h> // Includes 0_
 
 #define O_RDONLY 0x000
 #define O_WRONLY 0x001
@@ -79,7 +79,6 @@ int is_quote(char c)
 // Act as echo.c
 void echo(char **tokens)
 {
-    char temp;
     int i, j;
 
     printf("\n$ ");
@@ -421,7 +420,7 @@ int main(int argc, char *argv[])
         else
         {
             // Handle shell commands
-            display_tokens(tokens); // run_cmd(tokens);
+            //display_tokens(tokens); // run_cmd(tokens);
         }
     }
 
