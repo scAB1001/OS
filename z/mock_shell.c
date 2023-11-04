@@ -3,11 +3,7 @@
 #include <string.h>
 
 #include <unistd.h>
-<<<<<<< HEAD:z/x.c
 #include <fcntl.h> // Includes 0_
-=======
-//#include <fcntl.h> // Includes 0_
->>>>>>> a392805 (Migrated):z/mock_shell.c
 
 #define O_RDONLY 0x000
 #define O_WRONLY 0x001
@@ -339,12 +335,7 @@ int other_programs(char **tokens)
 {
     if (strcmp(*tokens, "exit") == 0)
     {
-<<<<<<< HEAD:z/x.c
-        printf("\nYou left the shell.\n");
-        printf("\n------------------------------\n\n");
-=======
         printf("You left the shell.\n");
->>>>>>> a392805 (Migrated):z/mock_shell.c
         return 1;
     }
     else if (strcmp(*tokens, "cd") == 0)
@@ -421,11 +412,7 @@ int main(int argc, char *argv[])
     {
         prompt_user(cmd, tokens);
 
-<<<<<<< HEAD:z/x.c
-        int stringIndex = search_for('<', tokens);
-=======
         //int stringIndex = search_for('<', tokens);
->>>>>>> a392805 (Migrated):z/mock_shell.c
 
         if (other_programs(tokens))
         {
