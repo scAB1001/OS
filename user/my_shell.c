@@ -4,19 +4,21 @@
 #include <stddef.h>
 //#include <fcntl.h>
 
+#define MAX_BUF_SIZE 512
+#define MAX_TOKENS 512
+
+/*
 void free_tokens(char **tokens)
 {
-
 	for (int i = 0; tokens[i] != NULL; i++)
 	{
 		free(tokens[i]);
 	}
 	free(tokens);
-}
-
+}*/
 
 // Execute a command
-void run_cmd(char **cmd)
+void run(char **str)
 {
 	int pid;
 
@@ -30,14 +32,10 @@ void run_cmd(char **cmd)
 	if (pid == 0)
 	{
 		// Child process
-		if (exec(*cmd, cmd) == -1)
+		if (exec(str[0], str) == -1)
 		{
-			printf("exec %s failed\n", *cmd);
+			printf("exec %s failed\n", *str);
 			exit(1);
-		}
-		else
-		{
-			printf("exec %s\n", *cmd);
 		}
 
 		//exit(0);
@@ -49,19 +47,6 @@ void run_cmd(char **cmd)
 	}
 }
 
-// Get the length of a string
-int count_chars(char *str)
-{
-	int length = 0;
-	while (*str != '\0')
-	{
-		length++;
-		str++;
-	}
-	return length;
-}
-
-// Get the length of the array of strings
 int count_strings(char **str)
 {
 	int count = 0;
@@ -73,121 +58,67 @@ int count_strings(char **str)
 	return count;
 }
 
-// Breaks when "' or '"
-int is_quote(char c)
-{
-	return c == '\'' || c == '"';
-}
-
-// Remove a final spaces from a string
-void rm_trailing_whitespace(char *str)
-{
-	// - 1 as the actual last is '\0'
-	int strLen = count_chars(str) - 1;
-	char lastChar = str[strLen];
-
-	if (lastChar == ' ')
-	{
-		str[strLen] = '\0';
-	}
-}
-
-// Remove consecutive spaces from a string
-void rm_consecutive_whitespace(char *str)
-{
-	char output[512];
-
-	// Track consecutive spaces (single spaces eg "cd .." are allowed)
-	int i, numSpaces = 0;
-
-	// Iterate until a null terminator is reached
-	for (i = 0; str[i]; i++)
-	{
-		// Copy cur char or prev non-space chars (not the first)
-		if (str[i] != ' ' || (i > 0 && str[i - 1] != ' '))
-		{
-			output[i - numSpaces] = str[i];
-		}
-		else
-		{
-			numSpaces++;
-		}
-	}
-
-	output[i - numSpaces] = '\0';
-
-	// Copy the modified string back to str
-	for (i = 0; output[i]; i++)
-	{
-		str[i] = output[i];
-	}
-
-	// Remove trailing (consecutive) whitespace
-	str[i] = '\0';
-}
-
-// Group function to remove all possible excess whitespace
-void rm_whitespace(char *str)
-{
-	rm_consecutive_whitespace(str);
-	rm_trailing_whitespace(str);
-}
-
 void display_tokens(char **tokens)
 {
-	printf("Tokens:\t\t");
+	printf("Tokens:");
 	for (int i = 0; i < count_strings(tokens); i++)
 	{
-		printf("'%s'\t", tokens[i]);
+		printf("[%s] ", tokens[i]);
 	}
 	printf("\n");
 }
 
-// Tokenize a cleaned string input
+// Tokenize the input string, ignoring excess whitespace
 void tokenize(char *str, char **tokens)
 {
 	int i = 0;
-	while (*str != '\0')
-	{
-		// Store the start of the token
-		tokens[i] = str;
 
-		// Find the end of the token
+	// Skip any initial spaces
+	while (*str == ' ')
+	{
+		str++;
+	}
+
+	while (*str && i < MAX_TOKENS - 1)
+	{
+		// Assign token start
+		tokens[i++] = str;
+
+		// Move str to the end of the current token
 		while (*str != ' ' && *str != '\0')
 		{
 			str++;
 		}
-
-		// End the token when a space is found
-		if (*str == ' ')
+		// If end of string, break out of loop
+		if (*str == '\0')
 		{
-			*str = '\0';
-			str++;
+			break;
 		}
 
-		// Proceed to the next token
-		i++;
+		// Null-terminate the current token and move to the next one
+		*str++ = '\0';
+
+		// Skip any consecutive spaces
+		while (*str == ' ')
+		{
+			str++;
+		}
 	}
 
-	// Ensure the last element is NULL to mark the end of tokens
+	// Null-terminate the array of tokens
 	tokens[i] = NULL;
 	display_tokens(tokens);
 }
 
+// Act as cd.c
 void cd(char **tokens)
 {
 	// Verify valid cd cmd
 	if (count_strings(tokens) == 2)
 	{
-		// For some reasons, char* x++; does not work in xv6
-		char* path = tokens[1];
-		if (chdir(path) < 0)
+		if (chdir(tokens[1]) < 0)
 		{
-			printf("cd: %s: No such file or directory.\n", path);
-		}
-		else
-		{
-			printf("You have moved to %s.\n", path);
+			printf("cd: %s: No such file or directory.\n", tokens[1]);
 		}
 	}
 	else
@@ -196,89 +127,18 @@ void cd(char **tokens)
 	}
 }
 
-/* Part 3: Input/Output redirection (6 Marks)
- * Implement Input/Output redirection.
- * For example:
- *   $ echo "Hello world" > temp    F|   Open to write the left
- *   $ cat < temp                   |   Open to read the right
- */
-
-
-// Finds the first occurrence of that character
-int contains_char(char **strings, char target, int *strPos)
+int prompt_user(char *str, char **tokens)
 {
-	/* Need to find a '<' or '>' alone, as the first index of
-	 *  that current string's token else ignore.
-	 * Store that string index in the arr, for later processing.
-	 */
-	*strPos = -1;
-	int i = 0, j;
-
-	// Loop through each string in arr of strings
-	while (strings[i] != NULL)
-	{
-		char *curStr = strings[i];
-		j = 0;
-
-		// Loop through chars in current string
-		while (curStr[j] != '\0')
-		{
-			// Check for a valid, non-quote match (for '<' or '>')
-			if (j == 0 && curStr[j] == target)
-			{
-				*strPos = i;
-				return 1;
-			}
-			j++;
-		}
-		i++;
-	}
-
-	return 0;
-}
-
-// Group method for finding a target character in an arr of strings
-int search_for(char target, char **str)
-{
-	int strPos;
-	if (contains_char(str, target, &strPos))
-	{
-		printf("\nFound '%c' at string[i]: %d.\n", target, strPos);
-	}
-	else
-	{
-		printf("\nDid not find '%c' character in the array of strings.\n", target);
-		printf("strPos: %d.\n", strPos);
-	}
-
-	return strPos;
-}
-
-void check_direction(char **tokens)
-{
-}
-
-void elem_redirection(char *str, char **tokens)
-{
-	if (count_strings(tokens) != 3)
-	{
-		printf("Usage: %s <source file> <destination file>\n", str);
-	}
-
-	// Open source file for reading
-}
-
-int prompt_user(char *cmd, char **tokens)
-{
-	printf("\n>>> ");
-	int bytesRead = read(0, cmd, sizeof(cmd));
+	printf(">>> ");
+	int bytesRead = read(0, str, sizeof(str));
 	if (bytesRead < 0)
 	{
 		return 1;
 	}
 
 	// Replace '\n' with '\0'
-	cmd[bytesRead - 1] = '\0';
+	str[bytesRead - 1] = '\0';
+	printf("\nInput: [%s]\n", str);
 	return 0;
 }
 
@@ -294,43 +154,39 @@ int exit_shell(char **tokens)
 
 void other_programs(char **tokens)
 {
-	if (strcmp(*tokens, "cd") == 0)
+	if (strcmp(tokens[0], "cd") == 0)
 	{
 		cd(tokens);
 	}
 	else
 	{ // Run shell commands
-		run_cmd(tokens);
+		run(tokens);
 	}
 }
 
 int main(int argc, char *argv[])
 {
-	char cmd[512], *tokens[512];
+	char input[MAX_BUF_SIZE];
+	char *tokens[MAX_TOKENS];
 
 	while (1)
 	{
-		if (prompt_user(cmd, tokens))
+		if (prompt_user(input, tokens))
 		{ // Exit
-			free_tokens(tokens);
 			break;
 		}
 
 		// Handle Input	
-		rm_whitespace(cmd);
-		tokenize(cmd, tokens);
+		tokenize(input, tokens);
 
 		if (exit_shell(tokens))
-		{ // Exit
-			free_tokens(tokens);
+		{
 			break;
 		}
+
 		// Handle new commands
 		other_programs(tokens);
-
-		// End
-		free_tokens(tokens);
 	}
-	
+
 	return 0;
 }
