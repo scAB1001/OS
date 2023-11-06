@@ -2,224 +2,240 @@
 #include "user/user.h"
 #include "kernel/fcntl.h"
 
-#define MAX_BUF_SZ_BUF_SZ 256
+#define MAX_BUF 100
+#define MAX_ARGS 10
 
-void is_whitespace(char c, int *result)
+int is_whitespace(char c)
 {
-	*result = (c == ' ' || c == '\t' || c == '\n');
+	return (c == ' ' || c == '\t' || c == '\n');
 	// XV6 might not support them... || c == '\v' || c == '\f' || c == '\r');
 }
 
-void print_tokens(char **tokens, int token_count)
+int dup2(int oldfd, int newfd)
 {
-	printf("Tokens:");
-	for (int i = 0; i < token_count; i++)
-	{
-		printf(" [%s]", tokens[i]);
-	}
-	printf("\t There are %d tokens.\n", token_count);
+	if (oldfd == newfd)
+		return newfd;  // If the file descriptors are the same, nothing to do
+	close(newfd);	   // Close the new file descriptor if it's already open
+	return dup(oldfd); // Duplicate the old file descriptor to new
 }
 
-void malloc_token(char **tokens, int index, int length)
+// Function to read a command line from input
+int get_cmd(char *buf, int nbuf)
 {
-	// Allocate memory for the new token at the specified 'index',
-	// +1 for null terminator.
-	tokens[index] = malloc(length + 1);
-	if (!tokens[index])
-	{
-		// If the memory allocation fails, print an error message and exit.
-		printf("Memory allocation failed\n");
-		exit(1);
-	}
+	fprintf(2, ">>> "); // Print the prompt
+	memset(buf, 0, nbuf);
+	gets(buf, nbuf);
+	if (buf[0] == 0) // EOF
+		return -1;	 // Indicate end of file or no input
+	return 0;		 // Indicate success
 }
 
-void allocate_tokens(char ***tokens, int new_count)
+// Function to split command line into arguments
+void tokenize(char *buf, char *argv[], int argv_max, int *argc_out)
 {
-	// Allocate memory for the array of char* pointers with the correct size
-	char **new_tokens = malloc(new_count * sizeof(char *));
-	if (!new_tokens)
+	char *p = buf;
+	int argc = 0;
+	while (argc < argv_max)
 	{
-		printf("Memory allocation failed\n");
-		exit(1);
+		// Skip leading spaces
+		while (is_whitespace(*p))
+			p++;
+		if (*p == 0)
+			break;
+		argv[argc++] = p;
+		// Scan over arg
+		while (!is_whitespace(*p) && *p != 0)
+			p++;
+		if (*p == 0)
+			break;
+		*p++ = 0; // Null terminate and advance
 	}
 
-	// If there was a previous allocation, copy the old pointers and free the old memory
-	if (*tokens)
+	if (argc >= argv_max)
 	{
-		for (int i = 0; i < new_count - 1; i++)
-		{ // Make sure you only copy existing tokens
-			new_tokens[i] = (*tokens)[i];
-		}
-		free(*tokens);
+		fprintf(2, "Too many arguments\n");
+		argc = -1; // Indicate error
 	}
 	else
 	{
-		for (int i = 0; i < new_count; i++)
-		{
-			new_tokens[i] = 0; // Initialise all new pointers to NULL
-		}
+		argv[argc] = 0; // Null terminate the argv list
 	}
 
-	// Redirect the passed tokens pointer to the new array
-	*tokens = new_tokens;
-}
-
-char **tokenize(const char *input, int *token_count)
-{
-	char **tokens = 0; // Initialize the tokens array to 0
-	const char *start = input;
-	int length = 0;
-	int result;
-	*token_count = 0;
-	int current_size = 0; // Variable to keep track of the current allocated size
-
-	while (*input)
+	if (argc_out != 0)
 	{
-		is_whitespace(*input, &result);
-		if (result)
-		{
-			if (length > 0)
-			{
-				if (*token_count == current_size)
-				{
-					// Increase the size before allocating new token
-					current_size += 1;
-					allocate_tokens(&tokens, current_size);
-				}
-				malloc_token(tokens, *token_count, length);
-				strcpy(tokens[*token_count], start);
-				tokens[*token_count][length] = '\0';
-				(*token_count)++;
-				length = 0;
-			}
-		}
-		else
-		{
-			if (length == 0)
-			{
-				start = input;
-			}
-			length++;
-		}
-		input++;
+		*argc_out = argc; // Pass back the number of arguments found
 	}
-
-	if (length > 0)
-	{
-		if (*token_count == current_size)
-		{
-			current_size += 1;
-			allocate_tokens(&tokens, current_size);
-		}
-		malloc_token(tokens, *token_count, length);
-		strcpy(tokens[*token_count], start);
-		tokens[*token_count][length] = '\0';
-		(*token_count)++;
-	}
-
-	print_tokens(tokens, *token_count);
-	return tokens;
-}
-
-void free_tokens(char **tokens, int token_count)
-{
-	if (tokens)
-	{
-		for (int i = 0; i < token_count; i++)
-		{
-			free(tokens[i]);
-			tokens[i] = 0;
-		}
-		tokens = 0;
-	}
-}
-
-int read_input(char *str)
-{
-	printf(">>> ");
-	memset(str, 0, MAX_BUF_SZ_BUF_SZ);
-	gets(str, MAX_BUF_SZ_BUF_SZ);
-
-	if (str[0] == 0) // EOF
-	{
-		return -1;
-	}
-
-	// Remove newline character if present
-	int len = strlen(str);
-	if (len > 0 && str[len - 1] == '\n')
-	{
-		str[len - 1] = '\0';
-	}
-
-	printf("Input : [%s]\t Len: %d\n", str, strlen(str));
-	return 0;
-}
-
-void cd(char *str)
-{
-	if (chdir(str + 3) < 0)
-	{
-		printf("cd: %s: No such file or directory.\n", str + 3);
-	}
-	else
-	{
-		printf("Moved into %s\n", str + 3);
-	}
-}
-
-void run(char **cmd)
-{
-	int pid = fork();
-
-	if (pid == 0)
-	{ // Child process
-		if (exec(cmd[0], cmd) < 0)
-		{
-			printf("exec %s failed\n", cmd[0]);
-			exit(1);
-		}
-	}
-	else if (pid > 0)
-	{ // Parent process
-		wait(0);
-	}
-	else
-	{
-		printf("Fork failed\n");
-		return;
-	}
-}
-
-int exit_shell(char *str)
-{
-	return (strcmp(str, "exit") == 0);
 }
 
 int main(void)
 {
-	char input[MAX_BUF_SZ_BUF_SZ];
-	while (read_input(input) >= 0)
+	static char buf[MAX_BUF];
+	char *argv[MAX_ARGS];
+	int fd_pipe[2];
+	int argc;
+
+	while (1)
 	{
-		if ((strlen(input) == 4) && (strcmp(input, "exit") == 0))
+		if (get_cmd(buf, sizeof(buf)) < 0)
+			continue; // Skip if no command is entered
+
+		tokenize(buf, argv, sizeof(argv) / sizeof(argv[0]), &argc);
+		if (argc < 0)
+			continue; // Skip if there was an error during tokenization
+
+		// Check for "cd" command
+		if (strcmp(argv[0], "cd") == 0)
 		{
-			printf("Exiting the shell...\n");
-			break;
+			if (argv[1] == 0)
+			{
+				fprintf(2, "cd missing argument\n");
+			}
+			else
+			{
+				if (chdir(argv[1]) < 0)
+				{
+					fprintf(2, "cd: failed to change directory to %s\n", argv[1]);
+				}
+			}
+			continue; // "cd" is handled in the shell process
 		}
-		if ((strlen(input) == 3) && (strcmp(input, "cd ") == 0))
+
+		// Initialize file descriptors for redirection
+		int redirect_in = -1, redirect_out = -1;
+
+		// Check for redirection
+		for (int i = 0; argv[i]; i++)
 		{
-			cd(input + 3);
+			if (strcmp(argv[i], ">") == 0)
+			{
+				// Output redirection
+				argv[i] = 0; // Terminate the arguments for exec
+				if (argv[i + 1])
+				{
+					redirect_out = open(argv[i + 1], O_WRONLY | O_CREATE);
+					if (redirect_out < 0)
+					{
+						printf("Cannot open file %s\n", argv[i + 1]);
+						exit(1);
+					}
+				}
+				else
+				{
+					printf("Output redirection requires a filename\n");
+					exit(1);
+				}
+				i++; // Skip the filename
+			}
+			else if (strcmp(argv[i], "<") == 0)
+			{
+				// Input redirection
+				argv[i] = 0; // Terminate the arguments for exec
+				if (argv[i + 1])
+				{
+					redirect_in = open(argv[i + 1], O_RDONLY);
+					if (redirect_in < 0)
+					{
+						printf("Cannot open file %s\n", argv[i + 1]);
+						exit(1);
+					}
+				}
+				else
+				{
+					printf("Input redirection requires a filename\n");
+					exit(1);
+				}
+				i++; // Skip the filename
+			}
 		}
 
-		int token_count = 0;
-		char **tokens = tokenize(input, &token_count);
-		printf("tkn[0]: [%s]\n", tokens[0]);
+		// Look for the pipe symbol
+		int i;
+		int piped = 0; // A flag to check if we have found a pipe
+		for (i = 0; argv[i]; i++)
+		{
+			if (strcmp(argv[i], "|") == 0)
+			{								 // If pipe is found
+				piped = 1;					 // Set piped flag
+				argv[i] = 0;				 // Null-terminate the first command
+				char **argv2 = &argv[i + 1]; // Get the second command's arguments
 
-		run(tokens);
+				if (pipe(fd_pipe) < 0)
+				{
+					fprintf(2, "pipe failed\n");
+					exit(1);
+				}
 
-		// printf("\n\t-- FREEING --\n");
-		free_tokens(tokens, token_count);
+				int pid1 = fork();
+				if (pid1 == 0)
+				{
+					// First child: executes the first command
+					close(fd_pipe[0]);	 // Close unused read end
+					dup2(fd_pipe[1], 1); // Redirect stdout to pipe write
+					close(fd_pipe[1]);	 // Close pipe write, not required anymore
+					exec(argv[0], argv);
+					fprintf(2, "exec %s failed\n", argv[0]);
+					exit(1);
+				}
+
+				int pid2 = fork();
+				if (pid2 == 0)
+				{
+					// Second child: executes the second command
+					close(fd_pipe[1]);	 // Close unused write end
+					dup2(fd_pipe[0], 0); // Redirect stdin to pipe read
+					close(fd_pipe[0]);	 // Close pipe read, not required anymore
+					exec(argv2[0], argv2);
+					fprintf(2, "exec %s failed\n", argv2[0]);
+					exit(1);
+				}
+
+				// Parent closes both ends of the pipe and waits for children
+				close(fd_pipe[0]);
+				close(fd_pipe[1]);
+				wait(0);
+				wait(0);
+
+				// Once the pipe handling is done, break out of the loop to wait for the next command
+				break;
+			}
+		}
+
+		// If no pipe was found, then execute a single command
+		if (!piped)
+		{
+			int pid = fork();
+			if (pid == 0)
+			{
+				// Child process
+				if (redirect_in != -1)
+				{
+					dup2(redirect_in, 0); // Replace stdin with input file
+					close(redirect_in);	  // Close original file descriptor
+				}
+				if (redirect_out != -1)
+				{
+					dup2(redirect_out, 1); // Replace stdout with output file
+					close(redirect_out);   // Close original file descriptor
+				}
+				exec(argv[0], argv);
+				printf("exec %s failed\n", argv[0]);
+				exit(1);
+			}
+			else if (pid > 0)
+			{
+				// Parent process
+				wait(0);
+				if (redirect_in != -1)
+					close(redirect_in); // Close file descriptor if used
+				if (redirect_out != -1)
+					close(redirect_out); // Close file descriptor if used
+			}
+			else
+			{
+				printf("fork failed\n");
+				exit(1);
+			}
+		}
 	}
-
-	return 0;
+	exit(0);
 }
