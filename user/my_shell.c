@@ -2,6 +2,13 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
+/*#define O_RDONLY 0x000
+#define O_WRONLY 0x001
+#define O_RDWR 0x002
+#define O_CREATE 0x200
+#define O_TRUNC 0x400
+*/
+
 #define INPUT_SIZE 256
 
 void is_whitespace(char c, int *result)
@@ -36,24 +43,10 @@ void print_tokens(char **tokens, int token_count)
 	printf("\t There are %d tokens.\n", token_count);
 }
 
-void realloc_tokens(char ***tokens, int new_size)
-{
-	// Reallocate the tokens array to hold 'new_size' number of pointers.
-	char **temp = realloc(*tokens, new_size * sizeof(char *));
-	if (!temp)
-	{
-		// If the reallocation fails, print an error message and exit.
-		printf("Memory reallocation failed\n");
-		exit(1);
-	}
-	// Update the tokens pointer to point to the newly allocated memory.
-	*tokens = temp;
-}
-
 void malloc_token(char **tokens, int index, int length)
 {
 	// Allocate memory for the new token at the specified 'index',
-	// including space for a null terminator.
+	// +1 for null terminator.
 	tokens[index] = malloc(length + 1);
 	if (!tokens[index])
 	{
@@ -63,13 +56,45 @@ void malloc_token(char **tokens, int index, int length)
 	}
 }
 
+void allocate_tokens(char ***tokens, int new_count)
+{
+	// Allocate memory for the array of char* pointers with the correct size
+	char **new_tokens = malloc(new_count * sizeof(char *));
+	if (!new_tokens)
+	{
+		printf("Memory allocation failed\n");
+		exit(1);
+	}
+
+	// If there was a previous allocation, copy the old pointers and free the old memory
+	if (*tokens)
+	{
+		for (int i = 0; i < new_count - 1; i++)
+		{ // Make sure you only copy existing tokens
+			new_tokens[i] = (*tokens)[i];
+		}
+		free(*tokens);
+	}
+	else
+	{
+		for (int i = 0; i < new_count; i++)
+		{
+			new_tokens[i] = 0; // Initialise all new pointers to NULL
+		}
+	}
+
+	// Redirect the passed tokens pointer to the new array
+	*tokens = new_tokens;
+}
+
 char **tokenize(const char *input, int *token_count)
 {
-	char **tokens = 0;
-	const char *start = input; // Pointer to the start of a potential token
-	int length = 0;			   // Length of the current token
-	int result;				   // To hold the result from is_whitespace
-	*token_count = 0;		   // Initialize the token count
+	char **tokens = 0; // Initialize the tokens array to 0
+	const char *start = input;
+	int length = 0;
+	int result;
+	*token_count = 0;
+	int current_size = 0; // Variable to keep track of the current allocated size
 
 	while (*input)
 	{
@@ -78,7 +103,12 @@ char **tokenize(const char *input, int *token_count)
 		{
 			if (length > 0)
 			{
-				realloc_tokens(&tokens, *token_count + 1);
+				if (*token_count == current_size)
+				{
+					// Increase the size before allocating new token
+					current_size += 1;
+					allocate_tokens(&tokens, current_size);
+				}
 				malloc_token(tokens, *token_count, length);
 				string_copy(tokens[*token_count], start, length);
 				tokens[*token_count][length] = '\0';
@@ -90,17 +120,20 @@ char **tokenize(const char *input, int *token_count)
 		{
 			if (length == 0)
 			{
-				start = input; // Update start to the current position
+				start = input;
 			}
 			length++;
 		}
 		input++;
 	}
 
-	// Handle the last token if there is no trailing whitespace
 	if (length > 0)
 	{
-		realloc_tokens(&tokens, *token_count + 1);
+		if (*token_count == current_size)
+		{
+			current_size += 1;
+			allocate_tokens(&tokens, current_size);
+		}
 		malloc_token(tokens, *token_count, length);
 		string_copy(tokens[*token_count], start, length);
 		tokens[*token_count][length] = '\0';
@@ -108,7 +141,7 @@ char **tokenize(const char *input, int *token_count)
 	}
 
 	print_tokens(tokens, *token_count);
-	return tokens; // Return the array of tokens
+	return tokens;
 }
 
 void free_tokens(char **tokens, int token_count)
@@ -132,19 +165,20 @@ void read_input(char *str)
 	{
 		str[bytesRead - 1] = '\0';
 	}
-	
+
 	printf("Input : [%s]\n", str);
 }
 
 void cd(char **tokens)
 {
+	// Error check token length in here?
 	if (chdir(tokens[1]) < 0)
 	{
 		printf("cd: %s: No such file or directory.\n", tokens[1]);
 	}
 	else
 	{
-		printf("Please include a path.\n");
+		printf("Moved into %s.\n", tokens[1]);
 	}
 }
 
@@ -169,14 +203,12 @@ void run(char **cmd)
 		printf("Fork failed\n");
 		return;
 	}
-	/**/
 }
 
 int exit_shell(char *str)
 {
-	return str[0] == 'e' && str[1] == 'x' && str[2] == 'i' && str[3] == 't' && str[4] == '\0';
+	return (str[0] == 'e' && str[1] == 'x' && str[2] == 'i' && str[3] == 't' && str[4] == '\0');
 }
-
 
 int main(void)
 {
@@ -204,7 +236,7 @@ int main(void)
 			run(tokens);
 		}
 
-		printf("\n\t-- FREEING --\n");
+		//printf("\n\t-- FREEING --\n");
 		free_tokens(tokens, token_count);
 	}
 
