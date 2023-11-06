@@ -1,6 +1,6 @@
 #include "kernel/types.h"
 #include "user/user.h"
-#include "kernel/fcntl.h"
+#include "kernel/fcntl.h" // For the R,W,TRUNC etc
 
 #define MAX_BUF_SZ 256
 #define MAX_TOK_SZ MAX_BUF_SZ / 2 + 1
@@ -128,11 +128,95 @@ int exit_shell(char *str)
 	return strcmp(str, "exit") == 0;
 }
 
-void redirection(char **cmd)
+int dup2(int oldfd, int newfd)
+{
+	if (oldfd == newfd)
+		return newfd; // If the file descriptors are equal, nothing to do.
+
+	close(newfd); // Close newfd if it's already open.
+
+	// Duplicate oldfd to newfd using a loop, in case of interruption by a signal.
+	int tempfd;
+	while ((tempfd = dup(oldfd)) != newfd)
+	{
+		if (tempfd == -1)
+			return -1; // If dup fails, return -1.
+
+		if (tempfd > newfd)
+		{
+			close(tempfd); // If dup assigns a fd greater than newfd, try again.
+		}
+	}
+
+	return newfd;
+}
+
+/*
+void redirect_io(char *inFile, char *outFile) 
+{
+	// Handle input redirection
+	if (inFile != 0)
+	{
+		close(0); // Close standard input
+
+		if (open(inFile, O_RDONLY) < 0)
+		{
+			printf("Failed to open input file '%s'\n", inFile);
+			exit(1);
+		}
+	}
+
+	// Handle output redirection
+	if (outFile != 0)
+	{
+		close(1); // Close standard output
+
+		if (open(outFile, O_WRONLY | O_CREATE | O_TRUNC) < 0)
+		{
+			printf("Failed to open output file '%s'\n", outFile);
+			exit(1);
+		}
+	}
+}*/
+
+void redirect_io(char *inFile, char *outFile) {
+    int fd; // File descriptor
+
+    // Handle input redirection
+    if (inFile != NULL) {
+        close(0); // Close standard input
+        fd = open(inFile, O_RDONLY);
+        if (fd < 0) {
+            printf("Failed to open input file '%s'\n", inFile);
+            exit(1);
+        }
+        if (fd != 0) {
+            dup2(fd, 0);
+            close(fd);
+        }
+    }
+
+    // Handle output redirection
+    if (outFile != NULL) {
+        close(1); // Close standard output
+        fd = open(outFile, O_WRONLY | O_CREAT | O_TRUNC, 0666); // Ensure the file is created if it does not exist
+        if (fd < 0) {
+            printf("Failed to open output file '%s'\n", outFile);
+            exit(1);
+        }
+        if (fd != 1) {
+            dup2(fd, 1);
+            close(fd);
+        }
+    }
+}
+
+
+void part3(char **cmd)
 {
     int i;
     char *inFile = 0, *outFile = 0;
-    char *pipeCmd[INPUT_SIZE] = {0};
+    char *pipeCmd[MAX_BUF_SZ] = {0};
 	
     // Parse the command to find redirection operators and the pipe operator
     for (i = 0; cmd[i] != 0; ++i)
@@ -182,6 +266,7 @@ void redirection(char **cmd)
             close(1);          // Close standard output
             dup(p[1]);         // Duplicate write end to standard output
             close(p[1]);       // Close original write end
+			printf("\n\tHERE1\n");
             exec(cmd[0], cmd); // Execute the first part of the pipe command
             exit(0);
         }
@@ -192,37 +277,16 @@ void redirection(char **cmd)
             close(0);                  // Close standard input
             dup(p[0]);                 // Duplicate read end to standard input
             close(p[0]);               // Close original read end
+			printf("\n\tHERE2\n");
             exec(pipeCmd[0], pipeCmd); // Execute the second part of the pipe command
         }
-    }
+    } 
     else
     {
-        // Handle input redirection
-        if (inFile != 0)
-        {
-            close(0); // Close standard input
-
-            if (open(inFile, O_RDONLY) < 0)
-            {
-                printf("Failed to open input file '%s'\n", inFile);
-                exit(1);
-            }
-        }
-
-        // Handle output redirection
-        if (outFile != 0)
-        {
-            close(1); // Close standard output
-
-            if (open(outFile, O_WRONLY | O_CREATE | O_TRUNC) < 0)
-            {
-                printf("Failed to open output file '%s'\n", outFile);
-                exit(1);
-            }
-        }
-
-        // Execute the command if there's no pipe
-        exec(cmd[0], cmd);
+		redirect_io(inFile, outFile);
+		// Execute the command if there's no pipe
+		printf("\n\tHERE3\n");
+		exec(cmd[0], cmd);
     }
 }
 
@@ -249,7 +313,7 @@ int main(void)
 		}
 		else if (count_strings(tokens) > 2)
 		{
-			redirection(tokens);
+			part3(tokens);
 		}
 		else
 		{
