@@ -1,7 +1,6 @@
-#include "kernel/types.h"
-#include "user/user.h"
-#include "kernel/fcntl.h" // For the R,W,TRUNC etc
 
+
+/*
 #define MAX_BUF_SZ 256
 #define MAX_TOK_SZ MAX_BUF_SZ / 2 + 1
 
@@ -32,8 +31,6 @@ int count_strings(char **str)
     }
     return count;
 }
-
-
 
 void print_tokens(char **tokens, int numTokens)
 {
@@ -66,7 +63,6 @@ void tokenize(char *buf, char **tokens)
 	//tokens[numTokens] = 0;
 	print_tokens(tokens, numTokens);
 }
-
 
 int read_input(char *str)
 {
@@ -121,7 +117,7 @@ void run(char **cmd)
 		printf("Fork failed\n");
 		exit(1);
 	}
-}/**/
+}
 
 int exit_shell(char *str)
 {
@@ -131,59 +127,20 @@ int exit_shell(char *str)
 int dup2(int oldfd, int newfd)
 {
 	if (oldfd == newfd)
-		return newfd; // If the file descriptors are equal, nothing to do.
-
-	close(newfd); // Close newfd if it's already open.
-
-	// Duplicate oldfd to newfd using a loop, in case of interruption by a signal.
-	int tempfd;
-	while ((tempfd = dup(oldfd)) != newfd)
 	{
-		if (tempfd == -1)
-			return -1; // If dup fails, return -1.
-
-		if (tempfd > newfd)
-		{
-			close(tempfd); // If dup assigns a fd greater than newfd, try again.
-		}
+		return newfd; // If the file descriptors are the same, nothing to do
 	}
+	close(newfd); // Close the new file descriptor if it's already open
 
-	return newfd;
+	return dup(oldfd); // Duplicate the old file descriptor to new
 }
-
-/*
-void redirect_io(char *inFile, char *outFile) 
-{
-	// Handle input redirection
-	if (inFile != 0)
-	{
-		close(0); // Close standard input
-
-		if (open(inFile, O_RDONLY) < 0)
-		{
-			printf("Failed to open input file '%s'\n", inFile);
-			exit(1);
-		}
-	}
-
-	// Handle output redirection
-	if (outFile != 0)
-	{
-		close(1); // Close standard output
-
-		if (open(outFile, O_WRONLY | O_CREATE | O_TRUNC) < 0)
-		{
-			printf("Failed to open output file '%s'\n", outFile);
-			exit(1);
-		}
-	}
-}*/
 
 void redirect_io(char *inFile, char *outFile) {
     int fd; // File descriptor
 
     // Handle input redirection
-    if (inFile != NULL) {
+    if (inFile != 0) 
+	{
         close(0); // Close standard input
         fd = open(inFile, O_RDONLY);
         if (fd < 0) {
@@ -197,20 +154,22 @@ void redirect_io(char *inFile, char *outFile) {
     }
 
     // Handle output redirection
-    if (outFile != NULL) {
+    if (outFile != 0) 
+	{
         close(1); // Close standard output
-        fd = open(outFile, O_WRONLY | O_CREAT | O_TRUNC, 0666); // Ensure the file is created if it does not exist
-        if (fd < 0) {
+        fd = open(outFile, O_WRONLY | O_CREATE | O_TRUNC); // Ensure the file is created if it does not exist
+        if (fd < 0) 
+		{
             printf("Failed to open output file '%s'\n", outFile);
             exit(1);
         }
-        if (fd != 1) {
+        if (fd != 1) 
+		{
             dup2(fd, 1);
             close(fd);
         }
     }
 }
-
 
 void part3(char **cmd)
 {
@@ -288,29 +247,169 @@ void part3(char **cmd)
 		printf("\n\tHERE3\n");
 		exec(cmd[0], cmd);
     }
-}
+} 
+
 
 int main(void)
 {
-	static char input[MAX_BUF_SZ] = {0};
+	static char buf[MAX_BUF_SZ] = {0};
 	char *tokens[MAX_TOK_SZ] = {0};
+	int fd_pipe[2];
 
-	while (read_input(input) == 0)
+	while (read_input(buf) == 0)
 	{
-		if (exit_shell(input))
+		if (exit_shell(buf))
 		{
 			printf("Exiting the shell...\n");
 			break;
 		}
 
 		//clear_array(tokens, MAX_BUF_SZ);
-		tokenize(input, tokens);
+		tokenize(buf, tokens);
 
-		printf("tkn[0]: [%s]\n", tokens[0]);
+		//printf("tkn[0]: [%s]\n", tokens[0]);
 		if ((strcmp(tokens[0], "cd") == 0))
 		{
 			cd(tokens);
 		}
+
+		// Initialize file descriptors for redirection
+		int redirect_in = -1, redirect_out = -1;
+
+		// Check for redirection
+		for (int i = 0; tokens[i]; i++)
+		{
+			if (strcmp(tokens[i], ">") == 0)
+			{
+				// Output redirection
+				tokens[i] = 0; // Terminate the arguments for exec
+				if (tokens[i + 1])
+				{
+					redirect_out = open(tokens[i + 1], O_WRONLY | O_CREATE);
+					if (redirect_out < 0)
+					{
+						printf("Cannot open file %s\n", tokens[i + 1]);
+						exit(1);
+					}
+				}
+				else
+				{
+					printf("Output redirection requires a filename\n");
+					exit(1);
+				}
+				i++; // Skip the filename
+			}
+			else if (strcmp(tokens[i], "<") == 0)
+			{
+				// Input redirection
+				tokens[i] = 0; // Terminate the arguments for exec
+				if (tokens[i + 1])
+				{
+					redirect_in = open(tokens[i + 1], O_RDONLY);
+					if (redirect_in < 0)
+					{
+						printf("Cannot open file %s\n", tokens[i + 1]);
+						exit(1);
+					}
+				}
+				else
+				{
+					printf("Input redirection requires a filename\n");
+					exit(1);
+				}
+				i++; // Skip the filename
+			}
+		}
+
+		// Look for the pipe symbol
+		int i;
+		int piped = 0; // A flag to check if we have found a pipe
+		for (i = 0; tokens[i]; i++)
+		{
+			if (strcmp(tokens[i], "|") == 0)
+			{								 // If pipe is found
+				piped = 1;					 // Set piped flag
+				tokens[i] = 0;				 // Null-terminate the first command
+				char **tokens2 = &tokens[i + 1]; // Get the second command's arguments
+
+				if (pipe(fd_pipe) < 0)
+				{
+					printf("pipe failed\n");
+					exit(1);
+				}
+
+				int pid1 = fork();
+				if (pid1 == 0)
+				{
+					// First child: executes the first command
+					close(fd_pipe[0]);	 // Close unused read end
+					dup2(fd_pipe[1], 1); // Redirect stdout to pipe write
+					close(fd_pipe[1]);	 // Close pipe write, not required anymore
+					exec(tokens[0], tokens);
+					printf("exec %s failed\n", tokens[0]);
+					exit(1);
+				}
+
+				int pid2 = fork();
+				if (pid2 == 0)
+				{
+					// Second child: executes the second command
+					close(fd_pipe[1]);	 // Close unused write end
+					dup2(fd_pipe[0], 0); // Redirect stdin to pipe read
+					close(fd_pipe[0]);	 // Close pipe read, not required anymore
+					exec(tokens2[0], tokens2);
+					printf("exec %s failed\n", tokens2[0]);
+					exit(1);
+				}
+
+				// Parent closes both ends of the pipe and waits for children
+				close(fd_pipe[0]);
+				close(fd_pipe[1]);
+				wait(0);
+				wait(0);
+
+				// Once the pipe handling is done, break out of the loop to wait for the next command
+				break;
+			}
+		}
+
+		// If no pipe was found, then execute a single command
+		if (!piped)
+		{
+			int pid = fork();
+			if (pid == 0)
+			{
+				// Child process
+				if (redirect_in != -1)
+				{
+					dup2(redirect_in, 0); // Replace stdin with input file
+					close(redirect_in);	  // Close original file descriptor
+				}
+				if (redirect_out != -1)
+				{
+					dup2(redirect_out, 1); // Replace stdout with output file
+					close(redirect_out);   // Close original file descriptor
+				}
+				exec(tokens[0], tokens);
+				printf("exec %s failed\n", tokens[0]);
+				exit(1);
+			}
+			else if (pid > 0)
+			{
+				// Parent process
+				wait(0);
+				if (redirect_in != -1)
+					close(redirect_in); // Close file descriptor if used
+				if (redirect_out != -1)
+					close(redirect_out); // Close file descriptor if used
+			}
+			else
+			{
+				printf("fork failed\n");
+				exit(1);
+			}
+		}
+
 		else if (count_strings(tokens) > 2)
 		{
 			part3(tokens);
@@ -324,5 +423,251 @@ int main(void)
 
 	return 0;
 }
+*/
 
 /**/
+#include "kernel/types.h"
+#include "user/user.h"
+#include "kernel/fcntl.h"
+
+#define MAX_BUF 100
+#define MAX_ARGS 10
+
+int is_whitespace(char c)
+{
+	return (c == ' ' || c == '\t' || c == '\n');
+	// XV6 might not support them... || c == '\v' || c == '\f' || c == '\r');
+}
+
+int dup2(int oldfd, int newfd)
+{
+	if (oldfd == newfd)
+		return newfd;  // If the file descriptors are the same, nothing to do
+	close(newfd);	   // Close the new file descriptor if it's already open
+	return dup(oldfd); // Duplicate the old file descriptor to new
+}
+
+// Function to read a command line from input
+int get_cmd(char *buf, int nbuf)
+{
+	fprintf(2, ">>> "); // Print the prompt
+	memset(buf, 0, nbuf);
+	gets(buf, nbuf);
+	if (buf[0] == 0) // EOF
+		return -1;	 // Indicate end of file or no input
+	return 0;		 // Indicate success
+}
+
+// Function to split command line into arguments
+void tokenize(char *buf, char *argv[], int argv_max, int *argc_out)
+{
+	char *p = buf;
+	int argc = 0;
+	while (argc < argv_max)
+	{
+		// Skip leading spaces
+		while (is_whitespace(*p))
+			p++;
+		if (*p == 0)
+			break;
+		argv[argc++] = p;
+		// Scan over arg
+		while (!is_whitespace(*p) && *p != 0)
+			p++;
+		if (*p == 0)
+			break;
+		*p++ = 0; // Null terminate and advance
+	}
+
+	if (argc >= argv_max)
+	{
+		fprintf(2, "Too many arguments\n");
+		argc = -1; // Indicate error
+	}
+	else
+	{
+		argv[argc] = 0; // Null terminate the argv list
+	}
+
+	if (argc_out != 0)
+	{
+		*argc_out = argc; // Pass back the number of arguments found
+	}
+}
+
+int main(void)
+{
+	static char buf[MAX_BUF];
+	char *argv[MAX_ARGS];
+	int fd_pipe[2];
+	int argc;
+
+	while (1)
+	{
+		if (get_cmd(buf, sizeof(buf)) < 0)
+			continue; // Skip if no command is entered
+
+		tokenize(buf, argv, sizeof(argv) / sizeof(argv[0]), &argc);
+		if (argc < 0)
+			continue; // Skip if there was an error during tokenization
+
+		// Check for "cd" command
+		if (strcmp(argv[0], "cd") == 0)
+		{
+			if (argv[1] == 0)
+			{
+				fprintf(2, "cd missing argument\n");
+			}
+			else
+			{
+				if (chdir(argv[1]) < 0)
+				{
+					fprintf(2, "cd: failed to change directory to %s\n", argv[1]);
+				}
+			}
+			continue; // "cd" is handled in the shell process
+		}
+
+		// Initialize file descriptors for redirection
+		int redirect_in = -1, redirect_out = -1;
+
+		// Check for redirection
+		for (int i = 0; argv[i]; i++)
+		{
+			if (strcmp(argv[i], ">") == 0)
+			{
+				// Output redirection
+				argv[i] = 0; // Terminate the arguments for exec
+				if (argv[i + 1])
+				{
+					redirect_out = open(argv[i + 1], O_WRONLY | O_CREATE);
+					if (redirect_out < 0)
+					{
+						printf("Cannot open file %s\n", argv[i + 1]);
+						exit(1);
+					}
+				}
+				else
+				{
+					printf("Output redirection requires a filename\n");
+					exit(1);
+				}
+				i++; // Skip the filename
+			}
+			else if (strcmp(argv[i], "<") == 0)
+			{
+				// Input redirection
+				argv[i] = 0; // Terminate the arguments for exec
+				if (argv[i + 1])
+				{
+					redirect_in = open(argv[i + 1], O_RDONLY);
+					if (redirect_in < 0)
+					{
+						printf("Cannot open file %s\n", argv[i + 1]);
+						exit(1);
+					}
+				}
+				else
+				{
+					printf("Input redirection requires a filename\n");
+					exit(1);
+				}
+				i++; // Skip the filename
+			}
+		}
+
+		// Look for the pipe symbol
+		int i;
+		int piped = 0; // A flag to check if we have found a pipe
+		for (i = 0; argv[i]; i++)
+		{
+			if (strcmp(argv[i], "|") == 0)
+			{								 // If pipe is found
+				piped = 1;					 // Set piped flag
+				argv[i] = 0;				 // Null-terminate the first command
+				char **argv2 = &argv[i + 1]; // Get the second command's arguments
+
+				if (pipe(fd_pipe) < 0)
+				{
+					fprintf(2, "pipe failed\n");
+					exit(1);
+				}
+
+				int pid1 = fork();
+				if (pid1 == 0)
+				{
+					// First child: executes the first command
+					close(fd_pipe[0]);	 // Close unused read end
+					dup2(fd_pipe[1], 1); // Redirect stdout to pipe write
+					close(fd_pipe[1]);	 // Close pipe write, not required anymore
+					exec(argv[0], argv);
+					fprintf(2, "exec %s failed\n", argv[0]);
+					exit(1);
+				}
+
+				int pid2 = fork();
+				if (pid2 == 0)
+				{
+					// Second child: executes the second command
+					close(fd_pipe[1]);	 // Close unused write end
+					dup2(fd_pipe[0], 0); // Redirect stdin to pipe read
+					close(fd_pipe[0]);	 // Close pipe read, not required anymore
+					exec(argv2[0], argv2);
+					fprintf(2, "exec %s failed\n", argv2[0]);
+					exit(1);
+				}
+
+				// Parent closes both ends of the pipe and waits for children
+				close(fd_pipe[0]);
+				close(fd_pipe[1]);
+				wait(0);
+				wait(0);
+
+				// Once the pipe handling is done, break out of the loop to wait for the next command
+				break;
+			}
+		}
+
+		// If no pipe was found, then execute a single command
+		if (!piped)
+		{
+			int pid = fork();
+			if (pid == 0)
+			{
+				// Child process// Handle redirection and pipes
+				void handle_redirection_and_pipes(char *argv[])
+				{
+					int redirect_in = -1, redirect_out = -1, fd_pipe[2];
+					int piped = 0;
+					if (redirect_in != -1)
+					{
+						dup2(redirect_in, 0); // Replace stdin with input file
+						close(redirect_in);	  // Close original file descriptor
+					}
+					if (redirect_out != -1)
+					{
+						dup2(redirect_out, 1); // Replace stdout with output file
+						close(redirect_out);   // Close original file descriptor
+					}
+					exec(argv[0], argv);
+					printf("exec %s failed\n", argv[0]);
+					exit(1);
+				}
+			else if (pid > 0)
+			{
+				// Parent process
+				wait(0);
+				if (redirect_in != -1)
+					close(redirect_in); // Close file descriptor if used
+				if (redirect_out != -1)
+					close(redirect_out); // Close file descriptor if used
+			}
+			else
+			{
+				printf("fork failed\n");
+				exit(1);
+			}
+		}
+	}
+	exit(0);
+}
