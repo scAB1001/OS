@@ -1,271 +1,312 @@
+
+/*ONLY PIPES & CMDs WORK*/
 #include "kernel/types.h"
-#include "kernel/stat.h"
 #include "user/user.h"
-#include <stddef.h>
+#include "kernel/fcntl.h"
 
-/*
-#define O_RDONLY 0x000
-#define O_WRONLY 0x001
-#define O_RDWR 0x002
-#define O_CREATE 0x200
-#define O_TRUNC 0x400
-*/
+#define MAX_ARGS 32
+#define MAX_COMMANDS 8
+#define COMMAND_BUF_SIZE 128
 
-#define MAX_BUF_SIZE 128
-#define MAX_TOKENS 64
-
-int count_strings(char **str)
+typedef struct
 {
-    int count = 0;
-    while (*str != NULL)
-    {
-        count++;
-        str++;
-    }
-    return count;
+    char *args[MAX_ARGS]; // Command with arguments
+} Command;
+
+int is_whitespace(char c)
+{
+    return (c == ' ' || c == '\t' || c == '\n');
+    // XV6 might not support them... || c == '\v' || c == '\f' || c == '\r');
 }
 
-void free_tokens(char **tokens)
+int dup2(int oldfd, int newfd)
 {
-    for (int i = 0; tokens[i] != NULL; i++)
+    if (oldfd == newfd)
     {
-        free(tokens[i]);
-    }
-}
-
-void clear_token_array(char **tokens, int size)
-{
-    for (int i = 0; i < size; i++)
-    {
-        tokens[i] = NULL;
-    }
-}
-
-// Prompt the user for an input
-void read_input(char *str, int max_size)
-{
-    printf(">>> ");
-    // Ensure there's room for null terminator
-    int bytesRead = read(0, str, max_size - 1);
-    if (bytesRead > 0)
-    {
-        str[bytesRead - 1] = '\0';
+        return newfd;
     }
 
-    //printf("\nIN: [%s]\n", str);
-}
+    close(newfd); // It's a good idea to check the return value here
 
-// Tokenize the input string, ignoring excess whitespace
-void tokenize(char *str, char **tokens)
-{
-    int i = 0;
-
-    // Skip any initial spaces
-    while (*str == ' ')
-    {
-        str++;
-    }
-
-    while (*str && i < MAX_TOKENS - 1)
-    {
-        // Assign token start
-        tokens[i++] = str;
-
-        // Move str to the end of the current token
-        while (*str != ' ' && *str != '\0')
+    int tempfd;
+    while ((tempfd = dup(oldfd)) != newfd)
+    { // Duplicate until we get the newfd
+        if (tempfd == -1)
         {
-            str++;
+            // Handle error: return -1 or exit
+            return -1;
         }
-        // If end of string, break out of loop
-        if (*str == '\0')
-        {
+        if (tempfd != newfd)
+            close(tempfd); // Avoid leaking file descriptors
+    }
+
+        return newfd;
+}
+
+// Function to read a command line from input
+int get_cmd(char *buf, int nbuf)
+{
+    fprintf(2, ">>> "); // Print the prompt
+    memset(buf, 0, nbuf);
+    gets(buf, nbuf);
+    if (buf[0] == 0) // EOF
+        return -1;   // Indicate end of file or no input
+    return 0;        // Indicate success
+}
+
+// Function to split command line into arguments
+void tokenize(char *buf, char *argv[], int argv_max, int *argc_out)
+{
+    char *p = buf;
+    int argc = 0;
+    while (argc < argv_max)
+    {
+        // Skip leading spaces
+        while (is_whitespace(*p))
+            p++;
+        if (*p == 0)
             break;
-        }
-
-        // Null-terminate the current token and move to the next one
-        *str++ = '\0';
-
-        // Skip any consecutive spaces
-        while (*str == ' ')
-        {
-            str++;
-        }
+        argv[argc++] = p;
+        // Scan over arg
+        while (!is_whitespace(*p) && *p != 0)
+            p++;
+        if (*p == 0)
+            break;
+        *p++ = 0; // Null terminate and advance
     }
 
-    // Null-terminate the array of tokens
-    tokens[i] = NULL; 
-    //print_tokens(tokens);
-}
-
-// Act as cd.c
-void cd(char **tokens)
-{
-    // Verify valid cd cmd
-    if (count_strings(tokens) == 2)
+    if (argc >= argv_max)
     {
-        if (chdir(tokens[1]) < 0)
-        {
-            printf("cd: %s: No such file or directory.\n", tokens[1]);
-        }
+        fprintf(2, "Too many arguments\n");
+        argc = -1; // Indicate error
     }
     else
     {
-        printf("Please include a path.\n");
+        argv[argc] = 0; // Null terminate the argv list
+    }
+
+    if (argc_out != 0)
+    {
+        *argc_out = argc; // Pass back the number of arguments found
     }
 }
 
-// Execute a command
-void run_cmd(char **cmd)
+void execute_command(Command *cmd)
 {
-    int pid = fork();
+    char *argv[MAX_ARGS + 1]; // extra space for the program name and the null terminator
+    for (int i = 0; cmd->args[i] != 0; ++i)
+    {
+        argv[i] = cmd->args[i];
+    }
+    argv[MAX_ARGS] = 0; // 0-terminate the array
+
+    if (exec(argv[0], argv) < 0)
+    {
+        fprintf(2, "exec failed\n");
+        exit(1);
+    }
+}
+
+void execute_pipeline(Command cmds[], int n)
+{
+    int fd[2];
+    int pid;
+
+    if (n == 0)
+    {
+        return; // No commands to execute
+    }
+
+    if (n == 1)
+    {
+        // Base case: execute the last command
+        execute_command(&cmds[0]);
+    }
+
+    // Create a pipe
+    if (pipe(fd) < 0)
+    {
+        fprintf(2, "pipe error\n");
+        exit(1);
+    }
+
+    if ((pid = fork()) < 0)
+    {
+        fprintf(2, "fork error\n");
+        exit(1);
+    }
 
     if (pid == 0)
-    { // Child process
-        if (exec(cmd[0], cmd) < 0)
-        {
-            printf("exec %s failed\n", cmd[0]);
-            exit(1);
-        }
-    }
-    else if (pid > 0)
-    { // Parent process
-        wait(0);
+    {                   // Child process
+        close(fd[0]);   // Close read end
+        dup2(fd[1], 1); // Connect write end of pipe to stdout
+        close(fd[1]);   // Close original write end
+
+        // Execute the first command
+        execute_command(&cmds[0]);
     }
     else
-    {
-        printf("Fork failed\n");
-        return;
+    {                   // Parent process
+        close(fd[1]);   // Close write end
+        dup2(fd[0], 0); // Connect read end of pipe to stdin
+        close(fd[0]);   // Close original read end
+
+        // Recursively set up the rest of the pipeline
+        execute_pipeline(cmds + 1, n - 1);
+
+        wait((int *)0); // Wait for child process to finish
     }
-    /**/
 }
 
-void redirection(char **cmd)
+int main(int argc, char *argv[])
 {
-    int i;
-    char *inFile = 0, *outFile = 0;
-    char *pipeCmd[INPUT_SIZE] = {0};
+    char cmd_buf[COMMAND_BUF_SIZE];
+    int argc = 0;
+    Command commands[MAX_COMMANDS]; // Array to store multiple commands
 
-    // Parse the command to find redirection operators and the pipe operator
-    for (i = 0; cmd[i] != 0; ++i)
-    {
-        if (strcmp(cmd[i], "<") == 0)
-        {
-            inFile = cmd[i + 1];
-            cmd[i] = 0;
-        }
-        else if (strcmp(cmd[i], ">") == 0)
-        {
-            outFile = cmd[i + 1];
-            cmd[i] = 0;
+    while (get_cmd(cmd_buf, sizeof(cmd_buf)) >= 0)
+    { // Keep reading commands until EOF
+        char *cmd_argv[MAX_ARGS];
+        int cmd_argc;
+
+        tokenize(cmd_buf, cmd_argv, MAX_ARGS, &cmd_argc); // Tokenize the input into arguments
+
+        if (cmd_argc <= 0)
+        { // No command entered or error
+            continue;
         }
 
-        else if (strcmp(cmd[i], "|") == 0)
+        // Check for "cd" command
+        if (strcmp(cmd_argv[0], "cd") == 0)
         {
-            cmd[i] = 0;
-            int j;
-
-            // Collect the command after the pipe operator
-            for (j = 0, i = i + 1; cmd[i] != 0; ++i, ++j)
+            if (cmd_argc == 1)
             {
-                pipeCmd[j] = cmd[i];
+                fprintf(2, "cd missing argument\n");
             }
-
-            pipeCmd[j] = 0;
-            break;
-        }
-    }
-
-    // If a pipe is detected, set up the pipe and fork
-    if (pipeCmd[0] != 0)
-    {
-        int p[2];
-
-        if (pipe(p) < 0)
-        {
-            printf("Pipe creation failed\n");
-            exit(1);
-        }
-
-        if (fork() == 0)
-        {
-            // Child process handles the command before the pipe
-            close(p[0]);       // Close unused read end
-            close(1);          // Close standard output
-            dup(p[1]);         // Duplicate write end to standard output
-            close(p[1]);       // Close original write end
-            exec(cmd[0], cmd); // Execute the first part of the pipe command
-            exit(0);
-        }
-        else
-        {
-            // Parent process handles the command after the pipe
-            close(p[1]);               // Close unused write end
-            close(0);                  // Close standard input
-            dup(p[0]);                 // Duplicate read end to standard input
-            close(p[0]);               // Close original read end
-            exec(pipeCmd[0], pipeCmd); // Execute the second part of the pipe command
-        }
-    }
-    else
-    {
-        // Handle input redirection
-        if (inFile != 0)
-        {
-            close(0); // Close standard input
-
-            if (open(inFile, O_RDONLY) < 0)
+            else
             {
-                printf("Failed to open input file '%s'\n", inFile);
-                exit(1);
+                if (chdir(cmd_argv[1]) < 0)
+                {
+                    fprintf(2, "cd: failed to change directory to %s\n", cmd_argv[1]);
+                }
+            }
+            continue; // Process next command
+        }
+
+        // Split the commands at each pipe character '|'
+        int i = 0, j = 0, cmd_index = 0;
+        commands[cmd_index].args[j++] = cmd_argv[i++];
+
+        while (i < cmd_argc)
+        {
+            if (strcmp(cmd_argv[i], "|") == 0)
+            {                                    // Found a pipe, switch to the next command
+                commands[cmd_index].args[j] = 0; // Terminate current command arguments
+                cmd_index++;
+                j = 0;
+                if (cmd_index >= MAX_COMMANDS)
+                {
+                    fprintf(2, "Too many commands\n");
+                    exit(1);
+                }
+                i++; // Skip over the pipe token
+            }
+            else
+            { // Otherwise, keep adding to the current command
+                commands[cmd_index].args[j++] = cmd_argv[i++];
             }
         }
+        commands[cmd_index].args[j] = 0; // Terminate last command arguments
+        argc = cmd_index + 1;
 
-        // Handle output redirection
-        if (outFile != 0)
-        {
-            close(1); // Close standard output
+        // Input/output redirection could be setup here before execute_pipeline is called
+        // if needed, as per your shell's design.
 
-            if (open(outFile, O_WRONLY | O_CREATE | O_TRUNC) < 0)
-            {
-                printf("Failed to open output file '%s'\n", outFile);
-                exit(1);
-            }
+        if (argc > 0)
+        { // If there's at least one command, execute the pipeline
+            execute_pipeline(commands, argc);
         }
 
-        // Execute the command if there's no pipe
-        exec(cmd[0], cmd);
+        memset(commands, 0, sizeof(commands)); // Reset the commands array for the next input
+        argc = 0;                      // Reset command count
     }
+
+    exit(0);
 }
 
-int main()
+/* MULTI-PIPES WORK ONLY NO I/O WORKS?? -- REVISIT
+int main(int argc, char *argv[])
 {
-    char input[MAX_BUF_SIZE];
-    char *tokens[MAX_TOKENS];
+    const int max_args = 32;
+    const int max_commands = 8;
+    const int command_buf_size = 128;
+    char cmd_buf[command_buf_size];
+    int argc = 0;
+    Command commands[max_commands]; // Array to store multiple commands
 
-    while (1)
-    {
-        // Clear buffer?
-        read_input(input, MAX_BUF_SIZE);
+    while (get_cmd(cmd_buf, sizeof(cmd_buf)) >= 0)
+    { // Keep reading commands until EOF
+        char *cmd_argv[max_args];
+        int cmd_argc;
 
-        // Clear the tokens array?
-        //clear_token_array(tokens, MAX_TOKENS);
-        tokenize(input, tokens);
+        tokenize(cmd_buf, cmd_argv, max_args, &cmd_argc); // Tokenize the input into arguments
 
-        if (strcmp(tokens[0], "exit") == 0)
+        // Check for "cd" command
+        if (strcmp(argv[0], "cd") == 0)
         {
-            printf("Exiting the shell.\n");
-            exit(0);
-        }
-        else if (strcmp(tokens[0], "cd") == 0)
-        {
-            cd(tokens);
-        }
-        else
-        {
-            run_cmd(tokens);
+            if (argv[1] == 0)
+            {
+                fprintf(2, "cd missing argument\n");
+            }
+            else
+            {
+                if (chdir(argv[1]) < 0)
+                {
+                    fprintf(2, "cd: failed to change directory to %s\n", argv[1]);
+                }
+            }
         }
 
-        free_tokens(tokens);
+        if (cmd_argc <= 0)
+        { // No command entered or error
+            continue;
+        }
+
+        // Split the commands at each pipe character '|'
+        int i = 0, j = 0, cmd_index = 0;
+        commands[cmd_index].args[j++] = cmd_argv[i++];
+
+        while (i < cmd_argc)
+        {
+            if (strcmp(cmd_argv[i], "|") == 0)
+            {										// Found a pipe, switch to the next command
+                commands[cmd_index].args[j] = 0; // Terminate current command arguments
+                cmd_index++;
+                j = 0;
+                if (cmd_index >= max_commands)
+                {
+                    fprintf(2, "Too many commands\n");
+                    exit(1);
+                }
+            }
+            else
+            { // Otherwise, keep adding to the current command
+                commands[cmd_index].args[j++] = cmd_argv[i];
+            }
+            i++;
+        }
+        commands[cmd_index].args[j] = 0; // Terminate last command arguments
+        argc = cmd_index + 1;
+
+        if (argc > 0)
+        { // If there's at least one command, execute the pipeline
+            execute_pipeline(commands, argc);
+        }
+
+        memset(commands, 0, sizeof(commands)); // Reset the commands array for the next input
+        argc = 0;					   // Reset command count
     }
-    return 0;
+
+    exit(0);
 }
+*/
