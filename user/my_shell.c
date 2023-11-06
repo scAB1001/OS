@@ -1,125 +1,146 @@
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
-#include <stddef.h>
-//#include <fcntl.h>
 
-#define MAX_BUF_SIZE 512
-#define MAX_TOKENS 512
+#define INPUT_SIZE 256
 
-/*
-void free_tokens(char **tokens)
+void is_whitespace(char c, int *result)
 {
-	for (int i = 0; tokens[i] != NULL; i++)
-	{
-		free(tokens[i]);
-	}
-	free(tokens);
-}*/
+	*result = (c == ' ' || c == '\t' || c == '\n');
+	// XV6 might not support them... || c == '\v' || c == '\f' || c == '\r');
+}
 
-// Execute a command
-void run(char **str)
+void string_length(const char *str, int *length)
 {
-	int pid;
+	const char *s;
+	for (s = str; *s; ++s);
+	*length = (s - str);
+}
 
-	// Fork a child process
-	if ((pid = fork()) < 0)
+void string_copy(char *dest, const char *src, int n)
+{
+	while (n-- && (*dest++ = *src++));
+	if (n >= 0)
 	{
-		printf("Fork failed\n");
-		return;
-	}
-
-	if (pid == 0)
-	{
-		// Child process
-		if (exec(str[0], str) == -1)
-		{
-			printf("exec %s failed\n", *str);
-			exit(1);
-		}
-
-		//exit(0);
-	}
-	else
-	{
-		// Parent process
-		wait(0); // Wait for child process to finish
+		*dest = '\0'; // Ensure null-termination
 	}
 }
 
-int count_strings(char **str)
-{
-	int count = 0;
-	while (*str != NULL)
-	{
-		count++;
-		str++;
-	}
-	return count;
-}
-
-void display_tokens(char **tokens)
+void print_tokens(char **tokens, int token_count)
 {
 	printf("Tokens:");
-	for (int i = 0; i < count_strings(tokens); i++)
+	for (int i = 0; i < token_count; i++)
 	{
-		printf("[%s] ", tokens[i]);
+		printf(" [%s]", tokens[i]);
 	}
-	printf("\n");
+	printf("\t There are %d tokens.\n", token_count);
 }
 
-// Tokenize the input string, ignoring excess whitespace
-void tokenize(char *str, char **tokens)
+void realloc_tokens(char ***tokens, int new_size)
 {
-	int i = 0;
-
-	// Skip any initial spaces
-	while (*str == ' ')
+	// Reallocate the tokens array to hold 'new_size' number of pointers.
+	char **temp = realloc(*tokens, new_size * sizeof(char *));
+	if (!temp)
 	{
-		str++;
+		// If the reallocation fails, print an error message and exit.
+		printf("Memory reallocation failed\n");
+		exit(1);
 	}
-
-	while (*str && i < MAX_TOKENS - 1)
-	{
-		// Assign token start
-		tokens[i++] = str;
-
-		// Move str to the end of the current token
-		while (*str != ' ' && *str != '\0')
-		{
-			str++;
-		}
-		// If end of string, break out of loop
-		if (*str == '\0')
-		{
-			break;
-		}
-
-		// Null-terminate the current token and move to the next one
-		*str++ = '\0';
-
-		// Skip any consecutive spaces
-		while (*str == ' ')
-		{
-			str++;
-		}
-	}
-
-	// Null-terminate the array of tokens
-	tokens[i] = NULL;
-	display_tokens(tokens);
+	// Update the tokens pointer to point to the newly allocated memory.
+	*tokens = temp;
 }
 
-// Act as cd.c
+void malloc_token(char **tokens, int index, int length)
+{
+	// Allocate memory for the new token at the specified 'index',
+	// including space for a null terminator.
+	tokens[index] = malloc(length + 1);
+	if (!tokens[index])
+	{
+		// If the memory allocation fails, print an error message and exit.
+		printf("Memory allocation failed\n");
+		exit(1);
+	}
+}
+
+char **tokenize(const char *input, int *token_count)
+{
+	char **tokens = 0;
+	const char *start = input; // Pointer to the start of a potential token
+	int length = 0;			   // Length of the current token
+	int result;				   // To hold the result from is_whitespace
+	*token_count = 0;		   // Initialize the token count
+
+	while (*input)
+	{
+		is_whitespace(*input, &result);
+		if (result)
+		{
+			if (length > 0)
+			{
+				realloc_tokens(&tokens, *token_count + 1);
+				malloc_token(tokens, *token_count, length);
+				string_copy(tokens[*token_count], start, length);
+				tokens[*token_count][length] = '\0';
+				(*token_count)++;
+				length = 0;
+			}
+		}
+		else
+		{
+			if (length == 0)
+			{
+				start = input; // Update start to the current position
+			}
+			length++;
+		}
+		input++;
+	}
+
+	// Handle the last token if there is no trailing whitespace
+	if (length > 0)
+	{
+		realloc_tokens(&tokens, *token_count + 1);
+		malloc_token(tokens, *token_count, length);
+		string_copy(tokens[*token_count], start, length);
+		tokens[*token_count][length] = '\0';
+		(*token_count)++;
+	}
+
+	print_tokens(tokens, *token_count);
+	return tokens; // Return the array of tokens
+}
+
+void free_tokens(char **tokens, int token_count)
+{
+	if (tokens)
+	{
+		for (int i = 0; i < token_count; i++)
+		{
+			free(tokens[i]);
+			tokens[i] = 0;
+		}
+		free(tokens);
+	}
+}
+
+void read_input(char *str)
+{
+	printf(">>> ");
+	int bytesRead = read(0, str, INPUT_SIZE - 1);
+	if (bytesRead > 0)
+	{
+		str[bytesRead - 1] = '\0';
+	}
+	
+	printf("Input : [%s]\n", str);
+}
+
 void cd(char **tokens)
 {
-	// Verify valid cd cmd
-	if (count_strings(tokens) == 2)
+	if (chdir(tokens[1]) < 0)
 	{
-		if (chdir(tokens[1]) < 0)
-		{
-			printf("cd: %s: No such file or directory.\n", tokens[1]);
-		}
+		printf("cd: %s: No such file or directory.\n", tokens[1]);
 	}
 	else
 	{
@@ -127,65 +148,64 @@ void cd(char **tokens)
 	}
 }
 
-int prompt_user(char *str, char **tokens)
+void run(char **cmd)
 {
-	printf(">>> ");
-	int bytesRead = read(0, str, sizeof(str));
-	if (bytesRead < 0)
-	{
-		return 1;
+	int pid = fork();
+
+	if (pid == 0)
+	{ // Child process
+		if (exec(cmd[0], cmd) < 0)
+		{
+			printf("exec %s failed\n", cmd[0]);
+			exit(1);
+		}
 	}
-
-	// Replace '\n' with '\0'
-	str[bytesRead - 1] = '\0';
-	printf("\nInput: [%s]\n", str);
-	return 0;
-}
-
-int exit_shell(char **tokens)
-{
-	if (strcmp(tokens[0], "exit") == 0)
-	{
-		printf("\nYou left the shell.\n");
-		return 1;
-	}
-	return 0;
-}
-
-void other_programs(char **tokens)
-{
-	if (strcmp(tokens[0], "cd") == 0)
-	{
-		cd(tokens);
+	else if (pid > 0)
+	{ // Parent process
+		wait(0);
 	}
 	else
-	{ // Run shell commands
-		run(tokens);
+	{
+		printf("Fork failed\n");
+		return;
 	}
+	/**/
 }
 
-int main(int argc, char *argv[])
+int exit_shell(char *str)
 {
-	char input[MAX_BUF_SIZE];
-	char *tokens[MAX_TOKENS];
+	return str[0] == 'e' && str[1] == 'x' && str[2] == 'i' && str[3] == 't' && str[4] == '\0';
+}
 
+
+int main(void)
+{
+	char input[INPUT_SIZE];
 	while (1)
 	{
-		if (prompt_user(input, tokens))
-		{ // Exit
-			break;
-		}
+		read_input(input);
 
-		// Handle Input	
-		tokenize(input, tokens);
-
-		if (exit_shell(tokens))
+		if (exit_shell(input))
 		{
+			printf("Exiting the shell...\n");
 			break;
 		}
 
-		// Handle new commands
-		other_programs(tokens);
+		int token_count = 0;
+		char **tokens = tokenize(input, &token_count);
+		printf("tkn[0]: [%s]\n", tokens[0]);
+
+		if ((token_count == 2) && (strcmp("cd", tokens[0]) == 0))
+		{
+			cd(tokens);
+		}
+		else
+		{
+			run(tokens);
+		}
+
+		printf("\n\t-- FREEING --\n");
+		free_tokens(tokens, token_count);
 	}
 
 	return 0;
