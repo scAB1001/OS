@@ -139,6 +139,103 @@ void run_cmd(char **cmd)
     /**/
 }
 
+void redirection(char **cmd)
+{
+    int i;
+    char *inFile = 0, *outFile = 0;
+    char *pipeCmd[INPUT_SIZE] = {0};
+
+    // Parse the command to find redirection operators and the pipe operator
+    for (i = 0; cmd[i] != 0; ++i)
+    {
+        if (strcmp(cmd[i], "<") == 0)
+        {
+            inFile = cmd[i + 1];
+            cmd[i] = 0;
+        }
+        else if (strcmp(cmd[i], ">") == 0)
+        {
+            outFile = cmd[i + 1];
+            cmd[i] = 0;
+        }
+
+        else if (strcmp(cmd[i], "|") == 0)
+        {
+            cmd[i] = 0;
+            int j;
+
+            // Collect the command after the pipe operator
+            for (j = 0, i = i + 1; cmd[i] != 0; ++i, ++j)
+            {
+                pipeCmd[j] = cmd[i];
+            }
+
+            pipeCmd[j] = 0;
+            break;
+        }
+    }
+
+    // If a pipe is detected, set up the pipe and fork
+    if (pipeCmd[0] != 0)
+    {
+        int p[2];
+
+        if (pipe(p) < 0)
+        {
+            printf("Pipe creation failed\n");
+            exit(1);
+        }
+
+        if (fork() == 0)
+        {
+            // Child process handles the command before the pipe
+            close(p[0]);       // Close unused read end
+            close(1);          // Close standard output
+            dup(p[1]);         // Duplicate write end to standard output
+            close(p[1]);       // Close original write end
+            exec(cmd[0], cmd); // Execute the first part of the pipe command
+            exit(0);
+        }
+        else
+        {
+            // Parent process handles the command after the pipe
+            close(p[1]);               // Close unused write end
+            close(0);                  // Close standard input
+            dup(p[0]);                 // Duplicate read end to standard input
+            close(p[0]);               // Close original read end
+            exec(pipeCmd[0], pipeCmd); // Execute the second part of the pipe command
+        }
+    }
+    else
+    {
+        // Handle input redirection
+        if (inFile != 0)
+        {
+            close(0); // Close standard input
+
+            if (open(inFile, O_RDONLY) < 0)
+            {
+                printf("Failed to open input file '%s'\n", inFile);
+                exit(1);
+            }
+        }
+
+        // Handle output redirection
+        if (outFile != 0)
+        {
+            close(1); // Close standard output
+
+            if (open(outFile, O_WRONLY | O_CREATE | O_TRUNC) < 0)
+            {
+                printf("Failed to open output file '%s'\n", outFile);
+                exit(1);
+            }
+        }
+
+        // Execute the command if there's no pipe
+        exec(cmd[0], cmd);
+    }
+}
 
 int main()
 {

@@ -1,184 +1,102 @@
 #include "kernel/types.h"
-#include "kernel/stat.h"
 #include "user/user.h"
+#include "kernel/fcntl.h"
 
-/*#define O_RDONLY 0x000
-#define O_WRONLY 0x001
-#define O_RDWR 0x002
-#define O_CREATE 0x200
-#define O_TRUNC 0x400
-*/
+#define MAX_BUF_SZ 256
+#define MAX_TOK_SZ MAX_BUF_SZ / 2 + 1
 
-#define INPUT_SIZE 256
-
-void is_whitespace(char c, int *result)
+int is_whitespace(char c)
 {
-	*result = (c == ' ' || c == '\t' || c == '\n');
+	return  (c == ' ' || c == '\t' || c == '\n');
 	// XV6 might not support them... || c == '\v' || c == '\f' || c == '\r');
 }
 
-void string_length(const char *str, int *length)
+void clear_array(char **arr, int arrSize)
 {
-	const char *s;
-	for (s = str; *s; ++s);
-	*length = (s - str);
-}
-
-void string_copy(char *dest, const char *src, int n)
-{
-	while (n-- && (*dest++ = *src++));
-	if (n >= 0)
+	if (arr)
 	{
-		*dest = '\0'; // Ensure null-termination
+		for (int i = 0; i < arrSize; i++)
+		{
+			arr[i] = 0;
+		}
 	}
 }
 
-void print_tokens(char **tokens, int token_count)
+int count_strings(char **str)
+{
+    int count = 0;
+    while (*str != 0)
+    {
+        count++;
+        str++;
+    }
+    return count;
+}
+
+
+
+void print_tokens(char **tokens, int numTokens)
 {
 	printf("Tokens:");
-	for (int i = 0; i < token_count; i++)
+	for (int i = 0; i < numTokens; i++)
 	{
 		printf(" [%s]", tokens[i]);
 	}
-	printf("\t There are %d tokens.\n", token_count);
+	printf("\t There are %d tokens.\n", numTokens);
 }
 
-void malloc_token(char **tokens, int index, int length)
+void tokenize(char *buf, char **tokens)
 {
-	// Allocate memory for the new token at the specified 'index',
-	// +1 for null terminator.
-	tokens[index] = malloc(length + 1);
-	if (!tokens[index])
+	int numTokens = 0, lenBuf = strlen(buf);
+	tokens[0] = buf;
+	for (int i = 0; i < lenBuf; i++)
 	{
-		// If the memory allocation fails, print an error message and exit.
-		printf("Memory allocation failed\n");
-		exit(1);
+		while (is_whitespace(*tokens[i]))
+		{
+			tokens[i]++;
+		}
+		tokens[i + 1] = strchr(tokens[i], ' ');
+		if (tokens[i + 1] == 0)
+		{
+			break;
+		}
+		*tokens[i + 1]++ = 0;
+		numTokens++;
 	}
+	//tokens[numTokens] = 0;
+	print_tokens(tokens, numTokens);
 }
 
-void allocate_tokens(char ***tokens, int new_count)
-{
-	// Allocate memory for the array of char* pointers with the correct size
-	char **new_tokens = malloc(new_count * sizeof(char *));
-	if (!new_tokens)
-	{
-		printf("Memory allocation failed\n");
-		exit(1);
-	}
 
-	// If there was a previous allocation, copy the old pointers and free the old memory
-	if (*tokens)
-	{
-		for (int i = 0; i < new_count - 1; i++)
-		{ // Make sure you only copy existing tokens
-			new_tokens[i] = (*tokens)[i];
-		}
-		free(*tokens);
-	}
-	else
-	{
-		for (int i = 0; i < new_count; i++)
-		{
-			new_tokens[i] = 0; // Initialise all new pointers to NULL
-		}
-	}
-
-	// Redirect the passed tokens pointer to the new array
-	*tokens = new_tokens;
-}
-
-char **tokenize(const char *input, int *token_count)
-{
-	char **tokens = 0; // Initialize the tokens array to 0
-	const char *start = input;
-	int length = 0;
-	int result;
-	*token_count = 0;
-	int current_size = 0; // Variable to keep track of the current allocated size
-
-	while (*input)
-	{
-		is_whitespace(*input, &result);
-		if (result)
-		{
-			if (length > 0)
-			{
-				if (*token_count == current_size)
-				{
-					// Increase the size before allocating new token
-					current_size += 1;
-					allocate_tokens(&tokens, current_size);
-				}
-				malloc_token(tokens, *token_count, length);
-				string_copy(tokens[*token_count], start, length);
-				tokens[*token_count][length] = '\0';
-				(*token_count)++;
-				length = 0;
-			}
-		}
-		else
-		{
-			if (length == 0)
-			{
-				start = input;
-			}
-			length++;
-		}
-		input++;
-	}
-
-	if (length > 0)
-	{
-		if (*token_count == current_size)
-		{
-			current_size += 1;
-			allocate_tokens(&tokens, current_size);
-		}
-		malloc_token(tokens, *token_count, length);
-		string_copy(tokens[*token_count], start, length);
-		tokens[*token_count][length] = '\0';
-		(*token_count)++;
-	}
-
-	print_tokens(tokens, *token_count);
-	return tokens;
-}
-
-void free_tokens(char **tokens, int token_count)
-{
-	if (tokens)
-	{
-		for (int i = 0; i < token_count; i++)
-		{
-			free(tokens[i]);
-			tokens[i] = 0;
-		}
-		free(tokens);
-	}
-}
-
-void read_input(char *str)
+int read_input(char *str)
 {
 	printf(">>> ");
-	int bytesRead = read(0, str, INPUT_SIZE - 1);
-	if (bytesRead > 0)
+	memset(str, 0, MAX_BUF_SZ);
+	if (gets(str, MAX_BUF_SZ) == 0) // EOF
 	{
-		str[bytesRead - 1] = '\0';
+		return -1;
 	}
 
-	printf("Input : [%s]\n", str);
+	// Remove newline character if present
+    int len = strlen(str);
+    if(len > 0 && str[len-1] == '\n') 
+	{
+        str[len-1] = '\0';
+    }
+
+	printf("Input : [%s]\t Len: %d\n", str, strlen(str));
+	return 0;
 }
 
 void cd(char **tokens)
 {
-	// Error check token length in here?
 	if (chdir(tokens[1]) < 0)
 	{
 		printf("cd: %s: No such file or directory.\n", tokens[1]);
 	}
 	else
 	{
-		printf("Moved into %s.\n", tokens[1]);
+		printf("Moved into %s\n", tokens[1]);
 	}
 }
 
@@ -201,44 +119,146 @@ void run(char **cmd)
 	else
 	{
 		printf("Fork failed\n");
-		return;
+		exit(1);
 	}
-}
+}/**/
 
 int exit_shell(char *str)
 {
-	return (str[0] == 'e' && str[1] == 'x' && str[2] == 'i' && str[3] == 't' && str[4] == '\0');
+	return strcmp(str, "exit") == 0;
+}
+
+void redirection(char **cmd)
+{
+    int i;
+    char *inFile = 0, *outFile = 0;
+    char *pipeCmd[INPUT_SIZE] = {0};
+	
+    // Parse the command to find redirection operators and the pipe operator
+    for (i = 0; cmd[i] != 0; ++i)
+    {
+        if (strcmp(cmd[i], "<") == 0)
+        {
+            inFile = cmd[i + 1];
+            cmd[i] = 0;
+        }
+        else if (strcmp(cmd[i], ">") == 0)
+        {
+            outFile = cmd[i + 1];
+            cmd[i] = 0;
+        }
+
+        else if (strcmp(cmd[i], "|") == 0)
+        {
+            cmd[i] = 0;
+            int j;
+
+            // Collect the command after the pipe operator
+            for (j = 0, i = i + 1; cmd[i] != 0; ++i, ++j)
+            {
+                pipeCmd[j] = cmd[i];
+            }
+
+            pipeCmd[j] = 0;
+            break;
+        }
+    }
+
+    // If a pipe is detected, set up the pipe and fork
+    if (pipeCmd[0] != 0)
+    {
+        int p[2];
+
+        if (pipe(p) < 0)
+        {
+            printf("Pipe creation failed\n");
+            exit(1);
+        }
+
+        if (fork() == 0)
+        {
+            // Child process handles the command before the pipe
+            close(p[0]);       // Close unused read end
+            close(1);          // Close standard output
+            dup(p[1]);         // Duplicate write end to standard output
+            close(p[1]);       // Close original write end
+            exec(cmd[0], cmd); // Execute the first part of the pipe command
+            exit(0);
+        }
+        else
+        {
+            // Parent process handles the command after the pipe
+            close(p[1]);               // Close unused write end
+            close(0);                  // Close standard input
+            dup(p[0]);                 // Duplicate read end to standard input
+            close(p[0]);               // Close original read end
+            exec(pipeCmd[0], pipeCmd); // Execute the second part of the pipe command
+        }
+    }
+    else
+    {
+        // Handle input redirection
+        if (inFile != 0)
+        {
+            close(0); // Close standard input
+
+            if (open(inFile, O_RDONLY) < 0)
+            {
+                printf("Failed to open input file '%s'\n", inFile);
+                exit(1);
+            }
+        }
+
+        // Handle output redirection
+        if (outFile != 0)
+        {
+            close(1); // Close standard output
+
+            if (open(outFile, O_WRONLY | O_CREATE | O_TRUNC) < 0)
+            {
+                printf("Failed to open output file '%s'\n", outFile);
+                exit(1);
+            }
+        }
+
+        // Execute the command if there's no pipe
+        exec(cmd[0], cmd);
+    }
 }
 
 int main(void)
 {
-	char input[INPUT_SIZE];
-	while (1)
-	{
-		read_input(input);
+	static char input[MAX_BUF_SZ] = {0};
+	char *tokens[MAX_TOK_SZ] = {0};
 
+	while (read_input(input) == 0)
+	{
 		if (exit_shell(input))
 		{
 			printf("Exiting the shell...\n");
 			break;
 		}
 
-		int token_count = 0;
-		char **tokens = tokenize(input, &token_count);
-		printf("tkn[0]: [%s]\n", tokens[0]);
+		//clear_array(tokens, MAX_BUF_SZ);
+		tokenize(input, tokens);
 
-		if ((token_count == 2) && (strcmp("cd", tokens[0]) == 0))
+		printf("tkn[0]: [%s]\n", tokens[0]);
+		if ((strcmp(tokens[0], "cd") == 0))
 		{
 			cd(tokens);
+		}
+		else if (count_strings(tokens) > 2)
+		{
+			redirection(tokens);
 		}
 		else
 		{
 			run(tokens);
 		}
-
-		//printf("\n\t-- FREEING --\n");
-		free_tokens(tokens, token_count);
+		// printf("\n\t-- FREEING --\n");
 	}
 
 	return 0;
 }
+
+/**/
