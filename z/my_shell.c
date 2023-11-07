@@ -1,312 +1,364 @@
-
-/*ONLY PIPES & CMDs WORK*/
+// Import necessary system headers from XV6 for types, user-level operations and file control
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
 
+// Define constants for buffer size and the maximum number of arguments
+#define MAX_BUF 256
 #define MAX_ARGS 32
-#define MAX_COMMANDS 8
-#define COMMAND_BUF_SIZE 128
 
-typedef struct
-{
-    char *args[MAX_ARGS]; // Command with arguments
-} Command;
-
+// Function to check if a character is a white space
+// Checks for space, horizontal tab, and newline characters
+// XV6 may not support vertical tab, form feed, or carriage return
 int is_whitespace(char c)
 {
+    // Returns true (1) if 'c' is a whitespace character; false (0) otherwise
     return (c == ' ' || c == '\t' || c == '\n');
-    // XV6 might not support them... || c == '\v' || c == '\f' || c == '\r');
 }
 
+// Function to duplicate a file descriptor to a given file descriptor number
+// If the file descriptors match, it returns the same descriptor
+// Otherwise, it attempts to duplicate the 'oldfd' to 'newfd'
 int dup2(int oldfd, int newfd)
 {
+    // Check if the file descriptors are identical; if so, return the new file descriptor
     if (oldfd == newfd)
-    {
         return newfd;
-    }
-
-    close(newfd); // It's a good idea to check the return value here
-
-    int tempfd;
-    while ((tempfd = dup(oldfd)) != newfd)
-    { // Duplicate until we get the newfd
-        if (tempfd == -1)
-        {
-            // Handle error: return -1 or exit
-            return -1;
-        }
-        if (tempfd != newfd)
-            close(tempfd); // Avoid leaking file descriptors
-    }
-
-        return newfd;
+    // If they are not the same, the new file descriptor is closed if it was previously open
+    close(newfd);
+    // The old file descriptor is then duplicated using the dup system call
+    // The lowest-numbered unused descriptor is used for the duplicate
+    return dup(oldfd);
 }
 
-// Function to read a command line from input
+// Function to prompt for and read a command line input
+// It writes a prompt to stderr, clears the buffer, and reads a line of input
+// If the input is EOF or empty, it returns -1 to indicate end of file/no input
 int get_cmd(char *buf, int nbuf)
 {
-    fprintf(2, ">>> "); // Print the prompt
+    // Write the command prompt ">>> " to stderr (file descriptor 2)
+    fprintf(2, ">>> ");
+    // Clear the buffer to prevent reading of any leftover data
     memset(buf, 0, nbuf);
+    // Read a line of input from stdin into the buffer
     gets(buf, nbuf);
-    if (buf[0] == 0) // EOF
-        return -1;   // Indicate end of file or no input
-    return 0;        // Indicate success
+    // Check if the buffer is empty (first character is null) indicating EOF
+    if (buf[0] == 0)
+        return -1; // Return -1 to indicate EOF or no input was read
+    // Return 0 to indicate that a command was successfully read
+    return 0;
 }
 
-// Function to split command line into arguments
+// Function to parse the input buffer into an array of argument strings
+// Separates based on whitespace, handles maximum number of arguments, and tracks the argument count
 void tokenize(char *buf, char *argv[], int argv_max, int *argc_out)
 {
+    // Pointer to traverse the buffer
     char *p = buf;
+    // Initialize argument count
     int argc = 0;
+
+    // Loop to process each argument up to the maximum allowed
     while (argc < argv_max)
     {
-        // Skip leading spaces
+        // Skip over any leading whitespace before an argument
         while (is_whitespace(*p))
             p++;
+        // If the current pointer is at the end of the string, break out of the loop
         if (*p == 0)
             break;
+        // Set the current argument to the non-whitespace character's pointer
         argv[argc++] = p;
-        // Scan over arg
+        // Move the pointer past the current argument
         while (!is_whitespace(*p) && *p != 0)
             p++;
+        // If end of the string is reached during argument scan, break the loop
         if (*p == 0)
             break;
-        *p++ = 0; // Null terminate and advance
+        // Null terminate the current argument and move the pointer to the next character
+        *p++ = 0;
     }
 
+    // Check if the number of arguments exceeds the maximum allowed
     if (argc >= argv_max)
     {
+        // If so, print an error message to stderr
         fprintf(2, "Too many arguments\n");
-        argc = -1; // Indicate error
+        // Set argc to -1 to indicate an error in argument parsing
+        argc = -1;
     }
     else
     {
-        argv[argc] = 0; // Null terminate the argv list
+        // Otherwise, null-terminate the array of arguments
+        argv[argc] = 0;
     }
 
+    // If a pointer to store the number of arguments was provided, set it to argc
     if (argc_out != 0)
     {
-        *argc_out = argc; // Pass back the number of arguments found
+        *argc_out = argc;
     }
 }
 
-void execute_command(Command *cmd)
+// Function to handle IO redirection in a command
+// It modifies the command's argument vector to execute without the redirection operators
+// and updates file descriptor pointers to point to the new file descriptors if redirection is specified
+void redirect_io(char **argv, int *fdIn, int *fdOut)
 {
-    char *argv[MAX_ARGS + 1]; // extra space for the program name and the null terminator
-    for (int i = 0; cmd->args[i] != 0; ++i)
+    // Iterate over the argument vector looking for redirection symbols
+    for (int i = 0; argv[i]; i++)
     {
-        argv[i] = cmd->args[i];
-    }
-    argv[MAX_ARGS] = 0; // 0-terminate the array
-
-    if (exec(argv[0], argv) < 0)
-    {
-        fprintf(2, "exec failed\n");
-        exit(1);
-    }
-}
-
-void execute_pipeline(Command cmds[], int n)
-{
-    int fd[2];
-    int pid;
-
-    if (n == 0)
-    {
-        return; // No commands to execute
-    }
-
-    if (n == 1)
-    {
-        // Base case: execute the last command
-        execute_command(&cmds[0]);
-    }
-
-    // Create a pipe
-    if (pipe(fd) < 0)
-    {
-        fprintf(2, "pipe error\n");
-        exit(1);
-    }
-
-    if ((pid = fork()) < 0)
-    {
-        fprintf(2, "fork error\n");
-        exit(1);
-    }
-
-    if (pid == 0)
-    {                   // Child process
-        close(fd[0]);   // Close read end
-        dup2(fd[1], 1); // Connect write end of pipe to stdout
-        close(fd[1]);   // Close original write end
-
-        // Execute the first command
-        execute_command(&cmds[0]);
-    }
-    else
-    {                   // Parent process
-        close(fd[1]);   // Close write end
-        dup2(fd[0], 0); // Connect read end of pipe to stdin
-        close(fd[0]);   // Close original read end
-
-        // Recursively set up the rest of the pipeline
-        execute_pipeline(cmds + 1, n - 1);
-
-        wait((int *)0); // Wait for child process to finish
-    }
-}
-
-int main(int argc, char *argv[])
-{
-    char cmd_buf[COMMAND_BUF_SIZE];
-    int argc = 0;
-    Command commands[MAX_COMMANDS]; // Array to store multiple commands
-
-    while (get_cmd(cmd_buf, sizeof(cmd_buf)) >= 0)
-    { // Keep reading commands until EOF
-        char *cmd_argv[MAX_ARGS];
-        int cmd_argc;
-
-        tokenize(cmd_buf, cmd_argv, MAX_ARGS, &cmd_argc); // Tokenize the input into arguments
-
-        if (cmd_argc <= 0)
-        { // No command entered or error
-            continue;
-        }
-
-        // Check for "cd" command
-        if (strcmp(cmd_argv[0], "cd") == 0)
+        // Check if the current argument is an output redirection symbol ">"
+        if (strcmp(argv[i], ">") == 0)
         {
-            if (cmd_argc == 1)
+            // Nullify the redirection argument to terminate the command arguments before execution
+            argv[i] = 0;
+            // Ensure that there is a filename following the redirection symbol
+            if (argv[i + 1])
             {
-                fprintf(2, "cd missing argument\n");
-            }
-            else
-            {
-                if (chdir(cmd_argv[1]) < 0)
+                // Open the output file with write permissions, create if it does not exist
+                *fdOut = open(argv[i + 1], O_WRONLY | O_CREATE);
+                // Check if the file descriptor is valid, indicating successful opening of the file
+                if (*fdOut < 0)
                 {
-                    fprintf(2, "cd: failed to change directory to %s\n", cmd_argv[1]);
-                }
-            }
-            continue; // Process next command
-        }
-
-        // Split the commands at each pipe character '|'
-        int i = 0, j = 0, cmd_index = 0;
-        commands[cmd_index].args[j++] = cmd_argv[i++];
-
-        while (i < cmd_argc)
-        {
-            if (strcmp(cmd_argv[i], "|") == 0)
-            {                                    // Found a pipe, switch to the next command
-                commands[cmd_index].args[j] = 0; // Terminate current command arguments
-                cmd_index++;
-                j = 0;
-                if (cmd_index >= MAX_COMMANDS)
-                {
-                    fprintf(2, "Too many commands\n");
+                    // Print an error message if the file could not be opened and exit the process
+                    printf("Cannot open file %s\n", argv[i + 1]);
                     exit(1);
                 }
-                i++; // Skip over the pipe token
             }
             else
-            { // Otherwise, keep adding to the current command
-                commands[cmd_index].args[j++] = cmd_argv[i++];
+            {
+                // If no filename is provided after ">", print an error message and exit the process
+                printf("Output redirection requires a filename\n");
+                exit(1);
             }
+            // Move past the filename to continue parsing potential further arguments
+            i++;
         }
-        commands[cmd_index].args[j] = 0; // Terminate last command arguments
-        argc = cmd_index + 1;
-
-        // Input/output redirection could be setup here before execute_pipeline is called
-        // if needed, as per your shell's design.
-
-        if (argc > 0)
-        { // If there's at least one command, execute the pipeline
-            execute_pipeline(commands, argc);
+        // Check if the current argument is an input redirection symbol "<"
+        else if (strcmp(argv[i], "<") == 0)
+        {
+            // Nullify the redirection argument to terminate the command arguments before execution
+            argv[i] = 0;
+            // Ensure that there is a filename following the redirection symbol
+            if (argv[i + 1])
+            {
+                // Open the input file with read permissions
+                *fdIn = open(argv[i + 1], O_RDONLY);
+                // Check if the file descriptor is valid, indicating successful opening of the file
+                if (*fdIn < 0)
+                {
+                    // Print an error message if the file could not be opened and exit the process
+                    printf("Cannot open file %s\n", argv[i + 1]);
+                    exit(1);
+                }
+            }
+            else
+            {
+                // If no filename is provided after "<", print an error message and exit the process
+                printf("Input redirection requires a filename\n");
+                exit(1);
+            }
+            // Move past the filename to continue parsing potential further arguments
+            i++;
         }
-
-        memset(commands, 0, sizeof(commands)); // Reset the commands array for the next input
-        argc = 0;                      // Reset command count
     }
-
-    exit(0);
 }
 
-/* MULTI-PIPES WORK ONLY NO I/O WORKS?? -- REVISIT
-int main(int argc, char *argv[])
+// Function to determine if there is a pipe '|' in the command arguments
+// and to set up and execute the piping mechanism if found
+int pipe_found(char **argv)
 {
-    const int max_args = 32;
-    const int max_commands = 8;
-    const int command_buf_size = 128;
-    char cmd_buf[command_buf_size];
-    int argc = 0;
-    Command commands[max_commands]; // Array to store multiple commands
+    // Flag to indicate whether a pipe is found in the command
+    int piped = 0;
+    // File descriptors array for pipe: fd_pipe[0] is for reading, fd_pipe[1] for writing
+    int fd_pipe[2];
 
-    while (get_cmd(cmd_buf, sizeof(cmd_buf)) >= 0)
-    { // Keep reading commands until EOF
-        char *cmd_argv[max_args];
-        int cmd_argc;
+    // Loop through the arguments to find a pipe symbol
+    for (int i = 0; argv[i]; i++)
+    {
+        // Check if the current argument is a pipe symbol "|"
+        if (strcmp(argv[i], "|") == 0)
+        {
+            // If a pipe is found, indicate it with the piped flag
+            piped = 1;
+            // Null-terminate the arguments at the pipe symbol to separate the commands
+            argv[i] = 0;
+            // Get the second part of the command starting from the argument after the pipe symbol
+            char **argv2 = &argv[i + 1];
 
-        tokenize(cmd_buf, cmd_argv, max_args, &cmd_argc); // Tokenize the input into arguments
+            // Attempt to create a pipe
+            if (pipe(fd_pipe) < 0)
+            {
+                // If pipe creation fails, output an error message and exit
+                fprintf(2, "pipe failed\n");
+                exit(1);
+            }
 
-        // Check for "cd" command
+            // Create the first child process to handle the first part of the pipe
+            int pid1 = fork();
+            if (pid1 == 0)
+            {
+                // First child process executes here:
+                // Close the unused read end of the pipe
+                close(fd_pipe[0]);
+                // Redirect standard output to the pipe's write end
+                dup2(fd_pipe[1], 1);
+                // Close the write end of the pipe, now duplicated to standard output
+                close(fd_pipe[1]);
+                // Execute the first command
+                exec(argv[0], argv);
+                // If exec fails, output an error message and exit
+                fprintf(2, "exec %s failed\n", argv[0]);
+                exit(1);
+            }
+
+            // Create the second child process to handle the second part of the pipe
+            int pid2 = fork();
+            if (pid2 == 0)
+            {
+                // Second child process executes here:
+                // Close the unused write end of the pipe
+                close(fd_pipe[1]);
+                // Redirect standard input to the pipe's read end
+                dup2(fd_pipe[0], 0);
+                // Close the read end of the pipe, now duplicated to standard input
+                close(fd_pipe[0]);
+                // Execute the second command
+                exec(argv2[0], argv2);
+                // If exec fails, output an error message and exit
+                fprintf(2, "exec %s failed\n", argv2[0]);
+                exit(1);
+            }
+
+            // Parent process closes both ends of the pipe
+            // No need for the parent to communicate with the pipe
+            close(fd_pipe[0]);
+            close(fd_pipe[1]);
+            // Parent waits for both child processes to finish
+            wait(0);
+            wait(0);
+
+            // After handling the pipe, break from the loop
+            // because the remaining arguments have been passed to the second command
+            break;
+        }
+    }
+    // Return the piped flag to indicate whether a pipe was handled or not
+    return piped;
+}
+
+// Function to execute a command without a pipe
+// It handles redirection if necessary and then executes the command
+void pipe_not_found(char **argv, int *fdIn, int *fdOut)
+{
+    // Fork to create a new process
+    int pid = fork();
+    if (pid == 0)
+    {
+        // Child process:
+        // If input redirection is specified, replace standard input with the input file
+        if (*fdIn != -1)
+        {
+            dup2(*fdIn, 0);
+            // Close the original file descriptor as it's no longer needed
+            close(*fdIn);
+        }
+        // If output redirection is specified, replace standard output with the output file
+        if (*fdOut != -1)
+        {
+            dup2(*fdOut, 1);
+            // Close the original file descriptor as it's no longer needed
+            close(*fdOut);
+        }
+        // Execute the command
+        exec(argv[0], argv);
+        // If exec fails, output an error message and exit
+        printf("exec %s failed\n", argv[0]);
+        exit(1);
+    }
+    else if (pid > 0)
+    {
+        // Parent process:
+        // Wait for the child process to complete
+        wait(0);
+        // Close any file descriptors if they have been used for redirection
+        if (*fdIn != -1)
+            close(*fdIn);
+        if (*fdOut != -1)
+            close(*fdOut);
+    }
+    else
+    {
+        // If fork fails, output an error message and exit
+        printf("fork failed\n");
+        exit(1);
+    }
+}
+
+// Entry point of the shell program
+int main(void)
+{
+    // Static buffer to store the command input by the user
+    static char buf[MAX_BUF];
+    // Array of pointers to hold the tokenized command and its arguments
+    char *argv[MAX_ARGS];
+    // Variable to hold the number of arguments
+    int argc;
+
+    // Infinite loop to keep the shell running
+    while (1)
+    {
+        // Read a command from the user input
+        // If reading the command fails, skip the current iteration
+        if (get_cmd(buf, sizeof(buf)) < 0)
+            continue; // Skip if no command is entered
+
+        // Tokenize the command string into arguments
+        tokenize(buf, argv, sizeof(argv) / sizeof(argv[0]), &argc);
+        // If tokenization fails (e.g., if argc is negative), skip the current iteration
+        if (argc < 0)
+            continue; // Skip if there was an error during tokenization
+
+        // Check if the first argument is the "cd" command
         if (strcmp(argv[0], "cd") == 0)
         {
+            // If there is no second argument for the "cd" command, print an error message
             if (argv[1] == 0)
             {
                 fprintf(2, "cd missing argument\n");
             }
             else
             {
+                // Try to change the directory to the path given in the second argument
+                // If changing directory fails, print an error message
                 if (chdir(argv[1]) < 0)
                 {
                     fprintf(2, "cd: failed to change directory to %s\n", argv[1]);
                 }
             }
+            // After handling "cd", continue to the next iteration
+            continue; // "cd" is handled in the shell process
         }
 
-        if (cmd_argc <= 0)
-        { // No command entered or error
-            continue;
-        }
+        // Initialize file descriptors for input and output redirection to invalid value
+        int fdIn = -1, fdOut = -1;
+        // Call a function to check for redirection symbols in the command and set up redirection
+        redirect_io(argv, &fdIn, &fdOut);
 
-        // Split the commands at each pipe character '|'
-        int i = 0, j = 0, cmd_index = 0;
-        commands[cmd_index].args[j++] = cmd_argv[i++];
+        // Flag to indicate if a pipe symbol was found in the command
+        int piped = 0;
+        // Check for pipe in the command and execute the necessary commands if a pipe is found
+        piped = pipe_found(argv);
 
-        while (i < cmd_argc)
+        // If there was no pipe symbol found in the command
+        if (!piped)
         {
-            if (strcmp(cmd_argv[i], "|") == 0)
-            {										// Found a pipe, switch to the next command
-                commands[cmd_index].args[j] = 0; // Terminate current command arguments
-                cmd_index++;
-                j = 0;
-                if (cmd_index >= max_commands)
-                {
-                    fprintf(2, "Too many commands\n");
-                    exit(1);
-                }
-            }
-            else
-            { // Otherwise, keep adding to the current command
-                commands[cmd_index].args[j++] = cmd_argv[i];
-            }
-            i++;
+            // Execute the command without a pipe, including handling any redirection
+            pipe_not_found(argv, &fdIn, &fdOut);
         }
-        commands[cmd_index].args[j] = 0; // Terminate last command arguments
-        argc = cmd_index + 1;
-
-        if (argc > 0)
-        { // If there's at least one command, execute the pipeline
-            execute_pipeline(commands, argc);
-        }
-
-        memset(commands, 0, sizeof(commands)); // Reset the commands array for the next input
-        argc = 0;					   // Reset command count
+        // Loop back to the beginning to process the next command
     }
-
+    // Exit the shell with a status code of 0 (successful termination)
     exit(0);
 }
-*/
